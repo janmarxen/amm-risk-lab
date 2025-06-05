@@ -1,0 +1,34 @@
+# Build and IDE files
+/build/
+/CMakeFiles/
+/CMakeCache.txt
+/Makefile
+/*.o
+/*.obj
+/*.exe
+/*.out
+/*.log
+*.swp
+*.swo
+*.DS_Store
+*.user
+*.vcxproj*
+*.opensdf
+*.sdf
+*.ipch
+*.idea/
+*.vscode/
+cmake_install.cmake
+
+# CUDA cache
+*.ptx
+*.cubin
+
+# Python cache (if any)
+__pycache__/
+*.pyc
+
+# Ignore generated data
+*.csv
+*.jsonl
+*.tmp
