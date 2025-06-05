@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <Eigen/Dense>
 
 /// Represents aggregated data for a liquidity pool fetched from the subgraph.
 struct PoolData {
@@ -20,5 +21,8 @@ struct PoolData {
     std::vector<double> liquidity; // Vector of global liquidity values at each timestamp (poolHourDatas.liquidity).
 };
 
-double dV_func(double dL, double gamma);
-double dL_func(double dP, double dSigma, double alpha, double beta);
+// Holds a time series of prices and their corresponding datetimes (ISO 8601 strings)
+struct PriceSeries {
+    std::vector<std::string> datetimes; // ISO 8601 datetime strings
+    Eigen::MatrixXd prices; // n_paths x N matrix (N = number of steps or 1 if final_only)
+};

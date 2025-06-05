@@ -13,7 +13,7 @@ This project provides tools for analytics, simulation, and parameter calibration
 - `src/` - Core C++ source files
 - `include/` - C++ headers
 - `scripts/` - Example and test scripts (run as executables)
-- `utils/` - utility functions and data
+- `utils/` - utility data
 - `CMakeLists.txt` - Build configuration
 
 ## Requirements
@@ -37,16 +37,12 @@ make
 
 ## Usage
 
+_To be added: Create proper folder with examples later_
+
 Example: Simulate an LP strategy
 
 ```sh
 ./test_lp_strategy <apiSubgraphs> <idSubgraphs> <poolAddress>
-```
-
-Example: Train AR parameters
-
-```sh
-./train_parameters <apiSubgraphs> <idSubgraphs> <poolAddress>
 ```
 
 ## License

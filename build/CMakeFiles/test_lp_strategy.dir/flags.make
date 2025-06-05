@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/g++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/usr/include/eigen3 -I/home/janmarxen/personal_projects/liquidity_pools_analytics/src -I/home/janmarxen/personal_projects/liquidity_pools_analytics/include -I/home/janmarxen/personal_projects/liquidity_pools_analytics/include/utils
+CXX_INCLUDES = -I/usr/include/eigen3 -I/home/janmarxen/personal_projects/liquidity_pools_analytics/src -I/home/janmarxen/personal_projects/liquidity_pools_analytics/include -I/home/janmarxen/personal_projects/liquidity_pools_analytics/include/utils -I/home/janmarxen/personal_projects/liquidity_pools_analytics/include/PLV_model
 
 CXX_FLAGS = 
 

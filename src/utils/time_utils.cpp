@@ -3,7 +3,7 @@
 #include <sstream>
 #include <iomanip>
 
-time_t to_unix_timestamp(const std::string& date_str) {
+time_t date_to_unix(const std::string& date_str) {
     struct tm tm_time = {};
     // Parse date string, assuming format "YYYY-MM-DD"
     strptime(date_str.c_str(), "%Y-%m-%d", &tm_time);
@@ -20,5 +20,21 @@ std::string unix_to_datetime(time_t unix_timestamp) {
     std::tm* tm = std::localtime(&unix_timestamp);
     std::stringstream ss;
     ss << std::put_time(tm, "%Y-%m-%d %H:%M:%S");
+    return ss.str();
+}
+
+std::tm parse_iso_datetime(const std::string& dt) {
+    std::tm tm = {};
+    std::istringstream ss(dt);
+    ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+    if (ss.fail()) {
+        throw std::runtime_error("Failed to parse datetime: " + dt);
+    }
+    return tm;
+}
+
+std::string format_iso_datetime(const std::tm& tm) {
+    std::ostringstream ss;
+    ss << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S");
     return ss.str();
 }

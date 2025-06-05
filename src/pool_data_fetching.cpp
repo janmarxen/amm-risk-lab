@@ -53,8 +53,8 @@ std::optional<PoolData> fetch_pool_data(const std::string& apiSubgraphs,
     const std::string& startDate, 
     const std::string& endDate) {
 
-    time_t start_ts = to_unix_timestamp(startDate);
-    time_t end_ts = to_unix_timestamp(endDate) + 86399; // end of day (23:59:59)
+    time_t start_ts = date_to_unix(startDate);
+    time_t end_ts = date_to_unix(endDate) + 86399; // end of day (23:59:59)
 
     // Construct the query string
     std::string graphqlQuery = R"({

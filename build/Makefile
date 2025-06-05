@@ -155,6 +155,32 @@ test_conversions/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_conversions.dir/build.make CMakeFiles/test_conversions.dir/build
 .PHONY : test_conversions/fast
 
+#=============================================================================
+# Target rules for targets named test_price_generation
+
+# Build rule for target.
+test_price_generation: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_price_generation
+.PHONY : test_price_generation
+
+# fast build rule for target.
+test_price_generation/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/build
+.PHONY : test_price_generation/fast
+
+#=============================================================================
+# Target rules for targets named PLV_model
+
+# Build rule for target.
+PLV_model: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 PLV_model
+.PHONY : PLV_model
+
+# fast build rule for target.
+PLV_model/fast:
+	$(MAKE) $(MAKESILENT) -f src/PLV_model/CMakeFiles/PLV_model.dir/build.make src/PLV_model/CMakeFiles/PLV_model.dir/build
+.PHONY : PLV_model/fast
+
 scripts/display_pool_data.o: scripts/display_pool_data.cpp.o
 .PHONY : scripts/display_pool_data.o
 
@@ -227,6 +253,30 @@ scripts/test_lp_strategy.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_lp_strategy.dir/build.make CMakeFiles/test_lp_strategy.dir/scripts/test_lp_strategy.cpp.s
 .PHONY : scripts/test_lp_strategy.cpp.s
 
+scripts/test_price_generation.o: scripts/test_price_generation.cpp.o
+.PHONY : scripts/test_price_generation.o
+
+# target to build an object file
+scripts/test_price_generation.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/scripts/test_price_generation.cpp.o
+.PHONY : scripts/test_price_generation.cpp.o
+
+scripts/test_price_generation.i: scripts/test_price_generation.cpp.i
+.PHONY : scripts/test_price_generation.i
+
+# target to preprocess a source file
+scripts/test_price_generation.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/scripts/test_price_generation.cpp.i
+.PHONY : scripts/test_price_generation.cpp.i
+
+scripts/test_price_generation.s: scripts/test_price_generation.cpp.s
+.PHONY : scripts/test_price_generation.s
+
+# target to generate assembly for a file
+scripts/test_price_generation.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/scripts/test_price_generation.cpp.s
+.PHONY : scripts/test_price_generation.cpp.s
+
 src/common.o: src/common.cpp.o
 .PHONY : src/common.o
 
@@ -234,6 +284,7 @@ src/common.o: src/common.cpp.o
 src/common.cpp.o:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_lp_strategy.dir/build.make CMakeFiles/test_lp_strategy.dir/src/common.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_conversions.dir/build.make CMakeFiles/test_conversions.dir/src/common.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/src/common.cpp.o
 .PHONY : src/common.cpp.o
 
 src/common.i: src/common.cpp.i
@@ -243,6 +294,7 @@ src/common.i: src/common.cpp.i
 src/common.cpp.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_lp_strategy.dir/build.make CMakeFiles/test_lp_strategy.dir/src/common.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_conversions.dir/build.make CMakeFiles/test_conversions.dir/src/common.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/src/common.cpp.i
 .PHONY : src/common.cpp.i
 
 src/common.s: src/common.cpp.s
@@ -252,6 +304,7 @@ src/common.s: src/common.cpp.s
 src/common.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_lp_strategy.dir/build.make CMakeFiles/test_lp_strategy.dir/src/common.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_conversions.dir/build.make CMakeFiles/test_conversions.dir/src/common.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/src/common.cpp.s
 .PHONY : src/common.cpp.s
 
 src/lp_strategy.o: src/lp_strategy.cpp.o
@@ -307,6 +360,30 @@ src/pool_data_fetching.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_lp_strategy.dir/build.make CMakeFiles/test_lp_strategy.dir/src/pool_data_fetching.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_conversions.dir/build.make CMakeFiles/test_conversions.dir/src/pool_data_fetching.cpp.s
 .PHONY : src/pool_data_fetching.cpp.s
+
+src/price_generation.o: src/price_generation.cpp.o
+.PHONY : src/price_generation.o
+
+# target to build an object file
+src/price_generation.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/src/price_generation.cpp.o
+.PHONY : src/price_generation.cpp.o
+
+src/price_generation.i: src/price_generation.cpp.i
+.PHONY : src/price_generation.i
+
+# target to preprocess a source file
+src/price_generation.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/src/price_generation.cpp.i
+.PHONY : src/price_generation.cpp.i
+
+src/price_generation.s: src/price_generation.cpp.s
+.PHONY : src/price_generation.s
+
+# target to generate assembly for a file
+src/price_generation.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/src/price_generation.cpp.s
+.PHONY : src/price_generation.cpp.s
 
 src/utils/conversions.o: src/utils/conversions.cpp.o
 .PHONY : src/utils/conversions.o
@@ -373,6 +450,7 @@ src/utils/time_utils.cpp.o:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/display_pool_data.dir/build.make CMakeFiles/display_pool_data.dir/src/utils/time_utils.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_lp_strategy.dir/build.make CMakeFiles/test_lp_strategy.dir/src/utils/time_utils.cpp.o
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_conversions.dir/build.make CMakeFiles/test_conversions.dir/src/utils/time_utils.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/src/utils/time_utils.cpp.o
 .PHONY : src/utils/time_utils.cpp.o
 
 src/utils/time_utils.i: src/utils/time_utils.cpp.i
@@ -383,6 +461,7 @@ src/utils/time_utils.cpp.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/display_pool_data.dir/build.make CMakeFiles/display_pool_data.dir/src/utils/time_utils.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_lp_strategy.dir/build.make CMakeFiles/test_lp_strategy.dir/src/utils/time_utils.cpp.i
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_conversions.dir/build.make CMakeFiles/test_conversions.dir/src/utils/time_utils.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/src/utils/time_utils.cpp.i
 .PHONY : src/utils/time_utils.cpp.i
 
 src/utils/time_utils.s: src/utils/time_utils.cpp.s
@@ -393,6 +472,7 @@ src/utils/time_utils.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/display_pool_data.dir/build.make CMakeFiles/display_pool_data.dir/src/utils/time_utils.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_lp_strategy.dir/build.make CMakeFiles/test_lp_strategy.dir/src/utils/time_utils.cpp.s
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_conversions.dir/build.make CMakeFiles/test_conversions.dir/src/utils/time_utils.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_price_generation.dir/build.make CMakeFiles/test_price_generation.dir/src/utils/time_utils.cpp.s
 .PHONY : src/utils/time_utils.cpp.s
 
 # Help Target
@@ -403,9 +483,11 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
+	@echo "... PLV_model"
 	@echo "... display_pool_data"
 	@echo "... test_conversions"
 	@echo "... test_lp_strategy"
+	@echo "... test_price_generation"
 	@echo "... scripts/display_pool_data.o"
 	@echo "... scripts/display_pool_data.i"
 	@echo "... scripts/display_pool_data.s"
@@ -415,6 +497,9 @@ help:
 	@echo "... scripts/test_lp_strategy.o"
 	@echo "... scripts/test_lp_strategy.i"
 	@echo "... scripts/test_lp_strategy.s"
+	@echo "... scripts/test_price_generation.o"
+	@echo "... scripts/test_price_generation.i"
+	@echo "... scripts/test_price_generation.s"
 	@echo "... src/common.o"
 	@echo "... src/common.i"
 	@echo "... src/common.s"
@@ -424,6 +509,9 @@ help:
 	@echo "... src/pool_data_fetching.o"
 	@echo "... src/pool_data_fetching.i"
 	@echo "... src/pool_data_fetching.s"
+	@echo "... src/price_generation.o"
+	@echo "... src/price_generation.i"
+	@echo "... src/price_generation.s"
 	@echo "... src/utils/conversions.o"
 	@echo "... src/utils/conversions.i"
 	@echo "... src/utils/conversions.s"

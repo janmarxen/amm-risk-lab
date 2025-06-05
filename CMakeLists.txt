@@ -14,6 +14,13 @@ include_directories(include)
 # Add utils directory
 include_directories(include/utils)
 
+# Add PLV_model source and include directories
+add_subdirectory(src/PLV_model)
+
+include_directories(
+    ${CMAKE_SOURCE_DIR}/include/PLV_model
+)
+
 # Add lp_strategy.cpp to your sources
 set(SOURCES
     src/common.cpp
@@ -22,18 +29,6 @@ set(SOURCES
     src/utils/subgraph_utils.cpp
     # ...other source files...
 )
-
-# add_executable(liquidity_pools_analytics
-#     src/price_generation.cpp
-#     src/common.cpp
-#     src/model_training.cpp
-#     src/pool_data_fetching.cpp
-# )
-
-# target_link_libraries(liquidity_pools_analytics
-#     Eigen3::Eigen
-#     CURL::libcurl
-# )
 
 add_executable(display_pool_data
     scripts/display_pool_data.cpp
@@ -75,6 +70,8 @@ target_link_libraries(test_conversions
 add_executable(test_price_generation
     scripts/test_price_generation.cpp
     src/price_generation.cpp
+    src/utils/time_utils.cpp
+    src/common.cpp
 )
 target_include_directories(test_price_generation PRIVATE include)
 target_link_libraries(test_price_generation

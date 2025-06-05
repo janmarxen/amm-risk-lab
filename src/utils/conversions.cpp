@@ -24,8 +24,8 @@ static std::optional<PoolPriceInfo> fetch_pool_price_info(
     const std::string& startDate,
     const std::string& endDate
 ) {
-    time_t start_ts = to_unix_timestamp(startDate);
-    time_t end_ts = to_unix_timestamp(endDate) + 86399;
+    time_t start_ts = date_to_unix(startDate);
+    time_t end_ts = date_to_unix(endDate) + 86399;
 
     std::string graphqlQuery = R"({
     pool(id: ")" + poolAddress + R"(") {
