@@ -1,0 +1,9 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# Mark C++ files as text
+*.cpp text
+*.h text
+*.hpp text
+*.c text
+*.cu text
