@@ -4,26 +4,21 @@
 #include <vector>
 #include <optional>
 #include <nlohmann/json.hpp>
-
-/// Helper struct for price and datetime series.
-struct PriceDatetimeSeries {
-    std::vector<std::string> datetime;
-    std::vector<double> price;
-};
+#include "common.h" // for PriceSeries
 
 /// Performs a GraphQL POST request and returns the parsed JSON or nullopt.
-std::optional<nlohmann::json> graphql_post(
+std::optional<nlohmann::json> run_subgraph_query(
     const std::string& apiSubgraphs,
     const std::string& idSubgraphs,
     const std::string& graphqlQuery
 );
 
 /// Parses a JSON response to extract price and datetime series.
-std::optional<PriceDatetimeSeries> parse_price_datetime_series(const nlohmann::json& json_data);
+std::optional<PriceSeries> parse_price_datetime_series(const nlohmann::json& json_data, int n_points = -1);
 
 /// Fetches price and datetime series for a pool from the subgraph.
 /// Returns std::nullopt on failure.
-std::optional<PriceDatetimeSeries> fetch_price_datetime_series(
+std::optional<PriceSeries> fetch_price_datetime_series(
     const std::string& apiSubgraphs,
     const std::string& idSubgraphs,
     const std::string& poolAddress,

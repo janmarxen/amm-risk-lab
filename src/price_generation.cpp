@@ -172,9 +172,7 @@ PriceSeries simulateGBMSeries(
 
     Eigen::MatrixXd prices = simulateGBM(S0, mu, sigma, T, steps, n_paths, use_gpu, blocks, threads_per_block, final_only);
 
-    PriceSeries result;
-    result.datetimes = datetimes;
-    result.prices = prices;
+    PriceSeries result(datetimes, prices);
     return result;
 }
 

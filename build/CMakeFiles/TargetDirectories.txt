@@ -1,9 +1,0 @@
-/home/janmarxen/personal_projects/liquidity_pools_analytics/build/CMakeFiles/display_pool_data.dir
-/home/janmarxen/personal_projects/liquidity_pools_analytics/build/CMakeFiles/test_lp_strategy.dir
-/home/janmarxen/personal_projects/liquidity_pools_analytics/build/CMakeFiles/test_conversions.dir
-/home/janmarxen/personal_projects/liquidity_pools_analytics/build/CMakeFiles/test_price_generation.dir
-/home/janmarxen/personal_projects/liquidity_pools_analytics/build/CMakeFiles/edit_cache.dir
-/home/janmarxen/personal_projects/liquidity_pools_analytics/build/CMakeFiles/rebuild_cache.dir
-/home/janmarxen/personal_projects/liquidity_pools_analytics/build/src/PLV_model/CMakeFiles/PLV_model.dir
-/home/janmarxen/personal_projects/liquidity_pools_analytics/build/src/PLV_model/CMakeFiles/edit_cache.dir
-/home/janmarxen/personal_projects/liquidity_pools_analytics/build/src/PLV_model/CMakeFiles/rebuild_cache.dir

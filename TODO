@@ -1,0 +1,9 @@
+Piority:
+- Backtest LP simulation against real-data
+- Develop dummy function for liquidity and volume prediction 
+- Distribute LP strategy simulation with CUDA. 
+- Make the simulations Gas fees aware.
+
+Non-Priority:
+- Add other time support (other than hourly)
+- Create Reinforcement Learning Bot ()

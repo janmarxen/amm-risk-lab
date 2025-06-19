@@ -1,1 +1,0 @@
-/usr/bin/g++ CMakeFiles/test.dir/src/test.cpp.o CMakeFiles/test.dir/src/pool_data_fetching.cpp.o CMakeFiles/test.dir/src/utils/time_utils.cpp.o -o test  /usr/lib/x86_64-linux-gnu/libcurl.so 

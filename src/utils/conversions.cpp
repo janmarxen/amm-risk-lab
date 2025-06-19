@@ -1,6 +1,7 @@
 #include "utils/conversions.h"
 #include "utils/time_utils.h"
 #include "utils/subgraph_utils.h"
+#include "common.h"
 #include <unordered_map>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -8,16 +9,8 @@
 #include <optional>
 #include <algorithm>
 
-// Struct to hold price series and token symbols for a pool
-struct PoolPriceInfo {
-    std::vector<std::string> datetime;
-    std::vector<double> price; // token0Price (token0 per token1)
-    std::string token0_symbol;
-    std::string token1_symbol;
-};
-
 // Helper to fetch price series and token symbols for a pool
-static std::optional<PoolPriceInfo> fetch_pool_price_info(
+static std::optional<PoolPriceSeries> fetch_pool_price_series(
     const std::string& apiSubgraphs,
     const std::string& idSubgraphs,
     const std::string& poolAddress,
@@ -42,24 +35,34 @@ static std::optional<PoolPriceInfo> fetch_pool_price_info(
     }
     })";
 
-    auto json_data_opt = graphql_post(apiSubgraphs, idSubgraphs, graphqlQuery);
+    auto json_data_opt = run_subgraph_query(apiSubgraphs, idSubgraphs, graphqlQuery);
     if (!json_data_opt.has_value()) return std::nullopt;
     const auto& json_data = json_data_opt.value();
 
-    PoolPriceInfo info;
+    std::string token0_symbol = "";
+    std::string token1_symbol = "";
+    std::vector<std::string> datetimes;
+    std::vector<double> prices;
+
     if (json_data.contains("data") && json_data["data"].contains("pool")) {
         const auto& pool = json_data["data"]["pool"];
-        info.token0_symbol = pool["token0"]["symbol"].get<std::string>();
-        info.token1_symbol = pool["token1"]["symbol"].get<std::string>();
+        token0_symbol = pool["token0"]["symbol"].get<std::string>();
+        token1_symbol = pool["token1"]["symbol"].get<std::string>();
     }
     if (json_data.contains("data") && json_data["data"].contains("poolHourDatas")) {
         for (const auto& hour_data : json_data["data"]["poolHourDatas"]) {
             time_t timestamp = hour_data["periodStartUnix"].get<time_t>();
-            info.datetime.push_back(unix_to_datetime(timestamp));
-            info.price.push_back(std::stod(hour_data["token0Price"].get<std::string>()));
+            datetimes.push_back(unix_to_datetime(timestamp));
+            prices.push_back(std::stod(hour_data["token0Price"].get<std::string>()));
         }
     }
-    return info;
+    int n_points = static_cast<int>(datetimes.size());
+    Eigen::MatrixXd price_mat(1, n_points);
+    for (int i = 0; i < n_points; ++i) price_mat(0, i) = prices[i];
+    PriceSeries price_series(datetimes, price_mat);
+
+    PoolPriceSeries series(token0_symbol, token1_symbol, price_series);
+    return series;
 }
 
 // Main conversion function
@@ -91,7 +94,7 @@ std::vector<double> convert_to_usd(
     std::string endDate = datetime.empty() ? "" : datetime.back().substr(0, 10);
 
     // Fetch price series and token symbols for the pool
-    auto price_info_opt = fetch_pool_price_info(apiSubgraphs, idSubgraphs, pool_address, startDate, endDate);
+    auto price_info_opt = fetch_pool_price_series(apiSubgraphs, idSubgraphs, pool_address, startDate, endDate);
     if (!price_info_opt.has_value()) {
         std::cerr << "Failed to fetch price info for pool " << pool_address << std::endl;
         return values;
@@ -112,8 +115,8 @@ std::vector<double> convert_to_usd(
 
     // Map datetime to price for fast lookup
     std::unordered_map<std::string, double> dt_to_price;
-    for (size_t i = 0; i < price_info.datetime.size(); ++i) {
-        dt_to_price[price_info.datetime[i]] = price_info.price[i];
+    for (int i = 0; i < price_info.price_series.n_points; ++i) {
+        dt_to_price[price_info.price_series.datetimes[i]] = price_info.price_series.prices(0, i);
     }
 
     // Conversion logic:
@@ -133,13 +136,13 @@ std::vector<double> convert_to_usd(
             std::find_if(usd_like.begin(), usd_like.end(), [&](const std::string& s) {
                 return strcasecmp(price_info.token1_symbol.c_str(), s.c_str()) == 0;
             }) != usd_like.end()) {
-            // currency is token0, token1 is USD: USD = value * price
+            // currency is token0, token1 is USD: USD = value / price
             usd_val = values[i] / price;
         } else if (strcasecmp(price_info.token1_symbol.c_str(), currency_symbol.c_str()) == 0 &&
                    std::find_if(usd_like.begin(), usd_like.end(), [&](const std::string& s) {
                        return strcasecmp(price_info.token0_symbol.c_str(), s.c_str()) == 0;
                    }) != usd_like.end()) {
-            // currency is token1, token0 is USD: USD = value / price
+            // currency is token1, token0 is USD: USD = value * price
             usd_val = values[i] * price;
         } else {
             // fallback: try to use price as multiplier
@@ -149,3 +152,6 @@ std::vector<double> convert_to_usd(
     }
     return usd_values;
 }
+
+
+

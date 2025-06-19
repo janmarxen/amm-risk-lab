@@ -17,7 +17,7 @@ size_t WriteCallback_subgraph_utils(void* contents, size_t size, size_t nmemb, s
     return totalSize;
 }
 
-std::optional<json> graphql_post(
+std::optional<json> run_subgraph_query(
     const std::string& apiSubgraphs,
     const std::string& idSubgraphs,
     const std::string& graphqlQuery
@@ -71,31 +71,51 @@ std::optional<json> graphql_post(
     return std::nullopt;
 }
 
-std::optional<PriceDatetimeSeries> parse_price_datetime_series(const json& json_data) {
+std::optional<PriceSeries> parse_price_datetime_series(const json& json_data, int n_points) {
     try {
-        PriceDatetimeSeries result;
         std::string token0_symbol, token1_symbol;
+        std::vector<std::string> datetimes;
+        std::vector<double> prices;
+
+        // Pre-allocate if n_points is provided and positive
+        if (n_points > 0) {
+            datetimes.resize(n_points);
+            prices.resize(n_points);
+        }
+
         if (json_data.contains("data") && json_data["data"].contains("pool")) {
             const auto& pool = json_data["data"]["pool"];
             token0_symbol = pool["token0"]["symbol"].get<std::string>();
             token1_symbol = pool["token1"]["symbol"].get<std::string>();
         }
         if (json_data.contains("data") && json_data["data"].contains("poolHourDatas")) {
-            for (const auto& hour_data : json_data["data"]["poolHourDatas"]) {
+            const auto& hour_datas = json_data["data"]["poolHourDatas"];
+            int idx = 0;
+            for (const auto& hour_data : hour_datas) {
                 time_t timestamp = hour_data["periodStartUnix"].get<time_t>();
-                result.datetime.push_back(unix_to_datetime(timestamp));
-                result.price.push_back(std::stod(hour_data["token0Price"].get<std::string>()));
+                if (n_points > 0) {
+                    datetimes[idx] = unix_to_datetime(timestamp);
+                    prices[idx] = std::stod(hour_data["token0Price"].get<std::string>());
+                    ++idx;
+                } else {
+                    datetimes.push_back(unix_to_datetime(timestamp));
+                    prices.push_back(std::stod(hour_data["token0Price"].get<std::string>()));
+                }
             }
         }
-        // Optionally, you could store token0_symbol/token1_symbol in result if needed
-        return result;
+        int actual_n_points = static_cast<int>(datetimes.size());
+        Eigen::MatrixXd price_mat(1, actual_n_points);
+        if (actual_n_points > 0) {
+            Eigen::Map<Eigen::RowVectorXd>(price_mat.data(), actual_n_points) = Eigen::Map<const Eigen::VectorXd>(prices.data(), actual_n_points).transpose();
+        }
+        return PriceSeries(datetimes, price_mat);
     } catch (const std::exception& e) {
         std::cerr << "Error parsing price/datetime series: " << e.what() << std::endl;
         return std::nullopt;
     }
 }
 
-std::optional<PriceDatetimeSeries> fetch_price_datetime_series(
+std::optional<PriceSeries> fetch_price_datetime_series(
     const std::string& apiSubgraphs,
     const std::string& idSubgraphs,
     const std::string& poolAddress,
@@ -105,7 +125,6 @@ std::optional<PriceDatetimeSeries> fetch_price_datetime_series(
     time_t start_ts = date_to_unix(startDate);
     time_t end_ts = date_to_unix(endDate) + 86399;
 
-    // Query both pool info (for token0/token1 symbols) and poolHourDatas
     std::string graphqlQuery = R"({
     pool(id: ")" + poolAddress + R"(") {
         token0 { symbol }
@@ -121,9 +140,16 @@ std::optional<PriceDatetimeSeries> fetch_price_datetime_series(
     }
     })";
 
-    auto json_data_opt = graphql_post(apiSubgraphs, idSubgraphs, graphqlQuery);
+    auto json_data_opt = run_subgraph_query(apiSubgraphs, idSubgraphs, graphqlQuery);
     if (!json_data_opt.has_value()) return std::nullopt;
-    return parse_price_datetime_series(json_data_opt.value());
+
+    // Count number of poolHourDatas entries
+    int n_points = -1;
+    const auto& json_data = json_data_opt.value();
+    if (json_data.contains("data") && json_data["data"].contains("poolHourDatas")) {
+        n_points = static_cast<int>(json_data["data"]["poolHourDatas"].size());
+    }
+    return parse_price_datetime_series(json_data, n_points);
 }
 
 // Helper to load pool addresses from JSON file

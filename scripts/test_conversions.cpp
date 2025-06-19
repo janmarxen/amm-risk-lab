@@ -17,12 +17,12 @@ int main(int argc, char* argv[]) {
     std::string startDate = "2025-05-17";
     std::string endDate = "2025-05-17";
 
-    auto pool_data_opt = fetch_pool_data(apiSubgraphs, idSubgraphs, poolAddress, startDate, endDate);
+    auto pool_data_opt = fetch_pool_series(apiSubgraphs, idSubgraphs, poolAddress, startDate, endDate);
     if (!pool_data_opt.has_value()) {
         std::cerr << "Failed to fetch pool data." << std::endl;
         return 1;
     }
-    const PoolData& pool_data = pool_data_opt.value();
+    const PoolSeries& pool_data = pool_data_opt.value();
 
     // We'll use token0 as the currency to convert to USD
     std::vector<double> values; 
@@ -30,7 +30,7 @@ int main(int argc, char* argv[]) {
     for (size_t i = 0; i < pool_data.price.size(); ++i) {
         values.push_back(1.0); // 1 unit of token0 per row
     }
-    const std::vector<std::string>& datetimes = pool_data.datetime;
+    const std::vector<std::string>& datetimes = pool_data.datetimes;
     std::string currency_symbol = pool_data.token1_symbol;
 
     // Convert to USD
