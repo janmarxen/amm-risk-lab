@@ -32,3 +32,5 @@ __pycache__/
 *.csv
 *.jsonl
 *.tmp
+
+python/ml/PLV/data/

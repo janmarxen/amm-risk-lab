@@ -1,0 +1,13 @@
+<apiSubgraphs> <idSubgraphs> <poolAddress>
+
+apiSubgraphs: d1762c97d76a973e078c5536742bd237 
+idSubgraphs: 5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV 
+
+python3 python/run_data_download.py
+
+python3 python/ml/PLV/run_training.py
+
+cd /home/janmarxen/personal_projects/liquidity_pools_analytics
+python3 -m python.ml.PLV.scripts.run_data_download
+python3 -m python.ml.PLV.scripts.run_training
+python3 -m python.ml.PLV.scripts.run_model_test
