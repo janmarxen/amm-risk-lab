@@ -6,6 +6,7 @@ Utility functions and PyTorch Dataset for loading, engineering, and preparing Un
 import pandas as pd
 import time
 from typing import List, Dict
+import numpy as np
 
 import torch
 from torch.utils.data import Dataset
@@ -20,22 +21,29 @@ def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
     if 'datetime' not in df.columns:
         df['datetime'] = pd.to_datetime(df['periodStartUnix'], unit='s')
     df = df.sort_values('datetime').reset_index(drop=True)
+    df['price'] = df['liquidity'].astype(float)
+    df['liquidity'] = df['liquidity'].astype(float)
+    df['volumeUSD'] = df['liquidity'].astype(float)
     # Returns
     df['price_return'] = df['price'].pct_change()
     df['liquidity_return'] = df['liquidity'].pct_change()
     df['volume_return'] = df['volumeUSD'].pct_change()
     # Outlier removal
     def remove_outliers_iqr(series, k=3.0):
-        q_01 = series.quantile(0.3)
-        q_90 = series.quantile(0.6)
-        iqr = q_90 - q_01
-        lower = q_01 - k * iqr
-        upper = q_90 + k * iqr
-        return series.where((series >= lower) & (series <= upper))
+        nonzero = series[series != 0]
+        q1 = nonzero.quantile(0.25)
+        q3 = nonzero.quantile(0.75)
+        iqr = q3 - q1
+        lower = q1 - k * iqr
+        upper = q3 + k * iqr
+        filtered = series.where((series >= lower) & (series <= upper))
+        filtered = filtered.interpolate(method='linear', limit_direction='both')
+        return filtered
+    # Apply to desired columns
     for col in ['price_return', 'liquidity_return', 'volume_return']:
         if col in df.columns:
             df[col] = remove_outliers_iqr(df[col])
-            df[col] = df[col].interpolate(method='linear', limit_direction='both')
+
     # Price-based volatility and moving averages
     df['price_volatility_3h'] = df['price_return'].rolling(window=3).std()
     df['price_volatility_6h'] = df['price_return'].rolling(window=6).std()
@@ -105,7 +113,7 @@ def get_X_y(df: pd.DataFrame, features: List[str], target_col: str, n_lags: int)
         X.append(df[features].iloc[i-n_lags:i].values)
         target = df[target_col].iloc[i]
         y_cls.append(1 if target == 0 else 0)
-        y_reg.append(float(target))
+        y_reg.append(target)
     return X, y_cls, y_reg
 
 def fetch_and_save_pools(
@@ -143,7 +151,7 @@ def fetch_and_save_pools(
             print(f"[{idx}/{total}] Skipping {addr}: insufficient data")
     # Save metadata
     meta = pd.DataFrame({
-        'pool_addresses': [fetched],
+        'pool_addresses': [','.join(fetched)],  # Store as comma-separated string for native type
         'fetch_time': [time.time()]
     })
     store.put('meta', meta)
@@ -173,7 +181,7 @@ def get_saved_pool_addresses(hdf5_path: str) -> List[str]:
     with pd.HDFStore(hdf5_path, mode='r') as store:
         if 'meta' in store:
             meta = store['meta']
-            return list(meta['pool_addresses'].iloc[0])
+            return list(meta['pool_addresses'].iloc[0].split(','))  # Split comma-separated string
         pools = [k[1:] for k in store.keys() if k.startswith('/pool_')]
         return [p[5:] for p in pools]
 
@@ -182,6 +190,7 @@ class LPsDataset(Dataset):
     PyTorch Dataset for LSTM pretraining/fine-tuning on multiple pools from HDF5.
     Each item is a tuple (X, y_cls, y_reg) for supervised learning.
     Allows flexible split: 'train', 'val', or 'test' using split_dates dict.
+    split_dates include 'train_start', 'train_end', 'val_start', 'val_end', 'test_start', 'test_end'.
     """
     def __init__(
         self,
@@ -203,7 +212,7 @@ class LPsDataset(Dataset):
             target: Name of target column.
             n_lags: Number of lag steps for LSTM.
             split: 'train', 'val', or 'test'.
-            split_dates: Dict with keys 'train_end', 'val_end' for splitting.
+            split_dates: Dict with keys 'train_start', 'train_end', 'val_start', 'val_end', 'test_start', 'test_end' for splitting.
             lag_features: List of features to lag (default: price_return, liquidity_return).
             verbose: Print progress if 1.
         """
@@ -222,25 +231,33 @@ class LPsDataset(Dataset):
                 if verbose:
                     print(f"{idx}/{total}: Error loading pool {addr}: {e}")
                 continue
-            # Flexible split logic
+            # Flexible split logic with custom start/end for each split
             if split_dates is not None:
                 if split == 'train':
+                    start = split_dates.get('train_start', None)
                     end = split_dates.get('train_end', None)
+                    if start is not None:
+                        df = df[df['datetime'] >= pd.to_datetime(start)]
                     if end is not None:
-                        df = df[df['datetime'] <= pd.to_datetime(end)].copy()
+                        df = df[df['datetime'] <= pd.to_datetime(end)]
+                    df = df.copy()
                 elif split == 'val':
-                    start = split_dates.get('train_end', None)
+                    start = split_dates.get('val_start', None)
                     end = split_dates.get('val_end', None)
                     if start is not None:
-                        df = df[df['datetime'] > pd.to_datetime(start)]
+                        df = df[df['datetime'] >= pd.to_datetime(start)]
                     if end is not None:
                         df = df[df['datetime'] <= pd.to_datetime(end)]
                     df = df.copy()
                 elif split == 'test':
-                    start = split_dates.get('val_end', None)
+                    start = split_dates.get('test_start', None)
+                    end = split_dates.get('test_end', None)
                     if start is not None:
-                        df = df[df['datetime'] > pd.to_datetime(start)].copy()
-            df = add_lagged_features(df, n_lags=n_lags, lag_features=lag_features)
+                        df = df[df['datetime'] >= pd.to_datetime(start)]
+                    if end is not None:
+                        df = df[df['datetime'] <= pd.to_datetime(end)]
+                    df = df.copy()
+            # df = add_lagged_features(df, n_lags=n_lags, lag_features=lag_features)
             df['pool'] = addr
             df = dropna_lstm(df, features, target)
             X, y_cls, y_reg = get_X_y(df, features, target, n_lags)
@@ -248,9 +265,9 @@ class LPsDataset(Dataset):
             self.y_cls.extend(y_cls)
             self.y_reg.extend(y_reg)
             if verbose:
-                print(f"{idx}/{total}: Pool Dataset processed")
+                print(f"{idx}/{total}: Pool {addr} Dataset processed")
         if self.X:
-            self.X = torch.tensor(self.X, dtype=torch.float32)
+            self.X = torch.tensor(np.array(self.X), dtype=torch.float32)  # Convert list of arrays to single ndarray first
             self.y_cls = torch.tensor(self.y_cls, dtype=torch.float32)
             self.y_reg = torch.tensor(self.y_reg, dtype=torch.float32)
         else:

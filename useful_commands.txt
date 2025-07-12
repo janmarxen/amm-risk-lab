@@ -10,4 +10,6 @@ python3 python/ml/PLV/run_training.py
 cd /home/janmarxen/personal_projects/liquidity_pools_analytics
 python3 -m python.ml.PLV.scripts.run_data_download
 python3 -m python.ml.PLV.scripts.run_training
-python3 -m python.ml.PLV.scripts.run_model_test
+python3 -m python.ml.PLV.scripts.run_testing
+
+./python/ml/PLV/scripts/batch_run.sh

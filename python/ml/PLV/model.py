@@ -19,8 +19,8 @@ class ZeroInflatedLSTM(nn.Module):
         self.regressor = nn.Linear(dense_units, 1)
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
-        self.feature_scaler = None
-        self.target_reg_scaler = None
+        self.feature_scaler = StandardScaler()
+        self.target_reg_scaler = StandardScaler()
         self._input_size = input_size
         self.n_lags = n_lags
 
@@ -65,8 +65,6 @@ class ZeroInflatedLSTM(nn.Module):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.to(device)
         # Initialize scalers for incremental fitting
-        self.feature_scaler = StandardScaler()
-        self.target_reg_scaler = StandardScaler()
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         for epoch in range(epochs):
             self.train()
@@ -93,7 +91,7 @@ class ZeroInflatedLSTM(nn.Module):
                 optimizer.step()
                 total_loss += loss.item() * X.size(0)
             if verbose and (epoch % 5 == 0 or epoch == epochs-1):
-                print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_dataset):.8f}")
+                print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_dataset):.12f}")
         return self
 
     def evaluate(self, val_dataset):
