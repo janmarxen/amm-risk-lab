@@ -21,9 +21,9 @@ def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
     if 'datetime' not in df.columns:
         df['datetime'] = pd.to_datetime(df['periodStartUnix'], unit='s')
     df = df.sort_values('datetime').reset_index(drop=True)
-    df['price'] = df['liquidity'].astype(float)
+    df['price'] = df['price'].astype(float)
     df['liquidity'] = df['liquidity'].astype(float)
-    df['volumeUSD'] = df['liquidity'].astype(float)
+    df['volumeUSD'] = df['volumeUSD'].astype(float)
     # Returns
     df['price_return'] = df['price'].pct_change()
     df['liquidity_return'] = df['liquidity'].pct_change()
@@ -44,13 +44,14 @@ def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = remove_outliers_iqr(df[col])
 
-    # Price-based volatility and moving averages
-    df['price_volatility_3h'] = df['price_return'].rolling(window=3).std()
-    df['price_volatility_6h'] = df['price_return'].rolling(window=6).std()
-    df['price_volatility_24h'] = df['price_return'].rolling(window=24).std()
-    df['price_ma_3h'] = df['price_return'].rolling(window=3).mean()
-    df['price_ma_6h'] = df['price_return'].rolling(window=6).mean()
-    df['price_ma_24h'] = df['price_return'].rolling(window=24).mean()
+    ### Should shift be 1 or -1? ### 
+    # Price-based volatility and moving averages (shifted by 1 to avoid lookahead bias)
+    df['price_volatility_3h'] = df['price_return'].shift(1).rolling(window=3).std()
+    df['price_volatility_6h'] = df['price_return'].shift(1).rolling(window=6).std()
+    df['price_volatility_24h'] = df['price_return'].shift(1).rolling(window=24).std()
+    df['price_ma_3h'] = df['price_return'].shift(1).rolling(window=3).mean()
+    df['price_ma_6h'] = df['price_return'].shift(1).rolling(window=6).mean()
+    df['price_ma_24h'] = df['price_return'].shift(1).rolling(window=24).mean()
     # Liquidity-based volatility and moving averages (shifted by 1 to avoid lookahead bias)
     df['liquidity_volatility_3h'] = df['liquidity_return'].shift(1).rolling(window=3).std()
     df['liquidity_volatility_6h'] = df['liquidity_return'].shift(1).rolling(window=6).std()
@@ -83,20 +84,7 @@ def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
         df = df.drop(columns=['periodStartUnix'])
     return df
 
-def add_lagged_features(df: pd.DataFrame, n_lags: int = 3, lag_features: List[str] = None) -> pd.DataFrame:
-    """
-    Add lagged versions of selected features to the DataFrame.
-    """
-    df = df.copy()
-    if lag_features is None:
-        lag_features = ['price_return', 'liquidity_return']
-    for feature in lag_features:
-        if feature in df.columns:
-            for lag in range(1, n_lags + 1):
-                df[f'{feature}_lag{lag}'] = df[feature].shift(lag)
-    return df
-
-def dropna_lstm(df: pd.DataFrame, features: List[str], target_col: str) -> pd.DataFrame:
+def dropna(df: pd.DataFrame, features: List[str], target_col: str) -> pd.DataFrame:
     """
     Drop rows with NaNs in any of the selected features or target column.
     """
@@ -105,13 +93,25 @@ def dropna_lstm(df: pd.DataFrame, features: List[str], target_col: str) -> pd.Da
 
 def get_X_y(df: pd.DataFrame, features: List[str], target_col: str, n_lags: int):
     """
-    Convert a DataFrame to supervised learning arrays for LSTM: (X, y_cls, y_reg).
-    X: lagged feature windows, y_cls: zero-class labels, y_reg: regression targets.
+    Convert a DataFrame to supervised learning arrays for LSTM:
+    - X: lagged feature windows (including present values at i)
+    - y_cls: zero-class labels
+    - y_reg: regression targets
+    For the target, only lags up to i-1 are included in X (not the present value).
     """
     X, y_cls, y_reg = [], [], []
     for i in range(n_lags, len(df)):
-        X.append(df[features].iloc[i-n_lags:i].values)
+        # Features: use values from i-n_lags+1 to i (inclusive, present included)
+        X_feats = df[features].iloc[i - n_lags + 1:i+1].values
+        # Target lags: use values from i-n_lags to i-1 (present excluded)
+        target_lags = df[target_col].iloc[i - n_lags:i].values.reshape(-1, 1)
+        # Concatenate features and target lags along the last axis
+        X_window = np.concatenate([X_feats, target_lags], axis=1)
         target = df[target_col].iloc[i]
+        # Remove samples with any NaN or inf in features or target
+        if not (np.all(np.isfinite(X_window)) and np.isfinite(target)):
+            continue
+        X.append(X_window)
         y_cls.append(1 if target == 0 else 0)
         y_reg.append(target)
     return X, y_cls, y_reg
@@ -166,13 +166,88 @@ def load_pool_data(hdf5_path: str, pool_address: str) -> pd.DataFrame:
         key = f'pool_{pool_address.lower()}'
         return store[key]
 
-def load_all_pools(hdf5_path: str) -> Dict[str, pd.DataFrame]:
+def load_all_pools_in_memory(hdf5_path: str) -> Dict[str, pd.DataFrame]:
     """
-    Load all pools' data from HDF5 as a dict of address -> DataFrame.
+    Load all pools' data from HDF5 as a dict of address -> DataFrame, kept in memory.
     """
     with pd.HDFStore(hdf5_path, mode='r') as store:
         pools = [k[1:] for k in store.keys() if k.startswith('/pool_')]
-        return {p[5:]: store[p] for p in pools}
+        pool_dict = {}
+        for p in pools:
+            addr = p[5:]
+            pool_dict[addr] = store[p]
+        return pool_dict
+
+def make_lps_dataset_from_pool_dict(
+    pool_dict: Dict[str, pd.DataFrame],
+    pool_addresses: list,
+    features: list,
+    target: str,
+    n_lags: int,
+    split: str,
+    split_dates: dict,
+    verbose: int = 1
+) -> torch.utils.data.Dataset:
+    """
+    Construct LPsDataset from a dict of DataFrames, avoiding disk reads.
+    """
+    class InMemoryLPsDataset(torch.utils.data.Dataset):
+        def __init__(self):
+            self.X, self.y_cls, self.y_reg = [], [], []
+            total = len(pool_addresses)
+            for idx, addr in enumerate(pool_addresses, 1):
+                if addr not in pool_dict:
+                    if verbose:
+                        print(f"{idx}/{total}: Pool {addr} not found in memory, skipping.")
+                    continue
+                df = pool_dict[addr]
+                # Flexible split logic with custom start/end for each split
+                if split_dates is not None:
+                    if split == 'train':
+                        start = split_dates.get('train_start', None)
+                        end = split_dates.get('train_end', None)
+                        if start is not None:
+                            df = df[df['datetime'] >= pd.to_datetime(start)]
+                        if end is not None:
+                            df = df[df['datetime'] <= pd.to_datetime(end)]
+                        df = df.copy()
+                    elif split == 'val':
+                        start = split_dates.get('val_start', None)
+                        end = split_dates.get('val_end', None)
+                        if start is not None:
+                            df = df[df['datetime'] >= pd.to_datetime(start)]
+                        if end is not None:
+                            df = df[df['datetime'] <= pd.to_datetime(end)]
+                        df = df.copy()
+                    elif split == 'test':
+                        start = split_dates.get('test_start', None)
+                        end = split_dates.get('test_end', None)
+                        if start is not None:
+                            df = df[df['datetime'] >= pd.to_datetime(start)]
+                        if end is not None:
+                            df = df[df['datetime'] <= pd.to_datetime(end)]
+                        df = df.copy()
+                df['pool'] = addr
+                df = dropna(df, features, target)
+                X, y_cls, y_reg = get_X_y(df, features, target, n_lags)
+                self.X.extend(X)
+                self.y_cls.extend(y_cls)
+                self.y_reg.extend(y_reg)
+                if verbose:
+                    print(f"{idx}/{total}: Pool {addr} Dataset processed")
+            if self.X:
+                self.X = torch.tensor(np.array(self.X), dtype=torch.float32)
+                self.y_cls = torch.tensor(self.y_cls, dtype=torch.float32)
+                self.y_reg = torch.tensor(self.y_reg, dtype=torch.float32)
+            else:
+                self.X = torch.empty((0, n_lags, len(features)), dtype=torch.float32)
+                self.y_cls = torch.empty((0,), dtype=torch.float32)
+                self.y_reg = torch.empty((0,), dtype=torch.float32)
+        def __len__(self):
+            return len(self.X)
+        def __getitem__(self, idx):
+            return self.X[idx], self.y_cls[idx], self.y_reg[idx]
+    return InMemoryLPsDataset()
 
 def get_saved_pool_addresses(hdf5_path: str) -> List[str]:
     """
@@ -201,7 +276,6 @@ class LPsDataset(Dataset):
         n_lags: int = 1,
         split: str = 'train',
         split_dates: dict = None,
-        lag_features=None,
         verbose: int = 1
     ):
         """
@@ -213,7 +287,6 @@ class LPsDataset(Dataset):
             n_lags: Number of lag steps for LSTM.
             split: 'train', 'val', or 'test'.
             split_dates: Dict with keys 'train_start', 'train_end', 'val_start', 'val_end', 'test_start', 'test_end' for splitting.
-            lag_features: List of features to lag (default: price_return, liquidity_return).
             verbose: Print progress if 1.
         """
         if pool_addresses is None:
@@ -257,9 +330,8 @@ class LPsDataset(Dataset):
                     if end is not None:
                         df = df[df['datetime'] <= pd.to_datetime(end)]
                     df = df.copy()
-            # df = add_lagged_features(df, n_lags=n_lags, lag_features=lag_features)
             df['pool'] = addr
-            df = dropna_lstm(df, features, target)
+            df = dropna(df, features, target)
             X, y_cls, y_reg = get_X_y(df, features, target, n_lags)
             self.X.extend(X)
             self.y_cls.extend(y_cls)

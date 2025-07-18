@@ -1,28 +1,87 @@
+import abc
 import torch
 import torch.nn as nn
-import torch.optim as optim
-
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error
 
-import numpy as np
+class ZeroInflatedTSModule(nn.Module, abc.ABC):
+    """
+    Abstract base class for zero-inflated time series models.
+    Provides common scaling, training, evaluation, and prediction utilities for time series models
+    with both classification and regression heads. Intended to be subclassed by specific architectures
+    such as LSTM and Transformer.
+    """
 
-class ZeroInflatedLSTM(nn.Module):
-    def __init__(self, input_size, n_lags=1, lstm_units=32, dense_units=16):
+    def __init__(self):
         super().__init__()
-        self.lstm = nn.LSTM(input_size, lstm_units, batch_first=True)
-        self.shared_dense = nn.Linear(lstm_units, dense_units)
-        # Classifier head
-        self.classifier = nn.Linear(dense_units, 1)
-        # Regressor head
-        self.regressor_dense = nn.Linear(dense_units, dense_units)
-        self.regressor = nn.Linear(dense_units, 1)
-        self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()
         self.feature_scaler = StandardScaler()
         self.target_reg_scaler = StandardScaler()
-        self._input_size = input_size
-        self.n_lags = n_lags
+
+    def fit(self, train_dataset, epochs=20, batch_size=64, lr=0.001, verbose=1, val_dataset=None, early_stopping_patience=10):
+        """
+        Train the model using a PyTorch Dataset and DataLoader, with incremental scaling.
+        Args:
+            train_dataset: PyTorch Dataset (X, y_cls, y_reg)
+            epochs: Number of epochs
+            batch_size: Batch size
+            lr: Learning rate
+            verbose: Print progress if True
+            val_dataset: Optional validation dataset for early stopping
+            early_stopping_patience: Number of epochs to wait for improvement
+        """
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.to(device)
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        best_val_loss = float('inf')
+        best_state = None
+        patience_counter = 0
+        for epoch in range(epochs):
+            self.train()
+            total_loss = 0
+            loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+            for X, y_cls, y_reg in loader:
+                # Incrementally fit scalers on this batch
+                X_np = X.numpy()
+                n_samples, n_lags, n_features = X_np.shape
+                X_reshaped = X_np.reshape(-1, n_features)
+                y_reg_np = y_reg.numpy().reshape(-1, 1)
+                self.feature_scaler.partial_fit(X_reshaped)
+                self.target_reg_scaler.partial_fit(y_reg_np)
+                # Transform batch using current scalers
+                X_scaled = self.feature_scaler.transform(X_reshaped).reshape(n_samples, n_lags, n_features)
+                y_reg_scaled = self.target_reg_scaler.transform(y_reg_np).flatten()
+                X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=device)
+                y_cls = y_cls.to(device).unsqueeze(1)
+                y_reg_tensor = torch.tensor(y_reg_scaled, dtype=torch.float32, device=device).unsqueeze(1)
+                optimizer.zero_grad()
+                cls_pred, reg_pred = self(X_tensor)
+                loss = self.__class__.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg_tensor)
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item() * X.size(0)
+            val_loss = None
+            if val_dataset is not None:
+                val_loss = self.evaluate(val_dataset)
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_state = {k: v.cpu().clone() for k, v in self.state_dict().items()}
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                if verbose:
+                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_dataset):.12f}, Val Loss: {val_loss:.12f}")
+                if patience_counter >= early_stopping_patience:
+                    if verbose:
+                        print(f"Early stopping at epoch {epoch+1}. Best Val Loss: {best_val_loss:.12f}")
+                    if best_state is not None:
+                        self.load_state_dict(best_state)
+                    break
+            else:
+                if verbose and (epoch % 5 == 0 or epoch == epochs-1):
+                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_dataset):.12f}")
+        # Restore best weights if early stopping was used
+        if val_dataset is not None and best_state is not None:
+            self.load_state_dict(best_state)
+        return self
 
     def scale_X(self, X):
         if isinstance(X, torch.Tensor):
@@ -43,65 +102,17 @@ class ZeroInflatedLSTM(nn.Module):
             y_reg_scaled = y_reg_scaled.cpu().numpy()
         return self.target_reg_scaler.inverse_transform(y_reg_scaled.reshape(-1, 1)).flatten()
 
-    def forward(self, x):
-        lstm_out, _ = self.lstm(x)
-        x = lstm_out[:, -1, :]
-        x = self.relu(self.shared_dense(x))
-        cls_out = self.sigmoid(self.classifier(x))
-        reg_x = self.relu(self.regressor_dense(x))
-        reg_out = self.regressor(reg_x)
-        return cls_out, reg_out
-
-    def fit(self, train_dataset, epochs=20, batch_size=64, lr=0.001, verbose=1):
-        """
-        Train the model using a PyTorch Dataset and DataLoader, with incremental scaling.
-        Args:
-            train_dataset: PyTorch Dataset (X, y_cls, y_reg)
-            epochs: Number of epochs
-            batch_size: Batch size
-            lr: Learning rate
-            verbose: Print progress if True
-        """
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.to(device)
-        # Initialize scalers for incremental fitting
-        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        for epoch in range(epochs):
-            self.train()
-            total_loss = 0
-            loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-            for X, y_cls, y_reg in loader:
-                # Incrementally fit scalers on this batch
-                X_np = X.numpy()
-                n_samples, n_lags, n_features = X_np.shape
-                X_reshaped = X_np.reshape(-1, n_features)
-                self.feature_scaler.partial_fit(X_reshaped)
-                y_reg_np = y_reg.numpy().reshape(-1, 1)
-                self.target_reg_scaler.partial_fit(y_reg_np)
-                # Transform batch using current scalers
-                X_scaled = self.feature_scaler.transform(X_reshaped).reshape(n_samples, n_lags, n_features)
-                y_reg_scaled = self.target_reg_scaler.transform(y_reg_np).flatten()
-                X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=device)
-                y_cls = y_cls.to(device).unsqueeze(1)
-                y_reg_tensor = torch.tensor(y_reg_scaled, dtype=torch.float32, device=device).unsqueeze(1)
-                optimizer.zero_grad()
-                cls_pred, reg_pred = self(X_tensor)
-                loss = custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg_tensor)
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item() * X.size(0)
-            if verbose and (epoch % 5 == 0 or epoch == epochs-1):
-                print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_dataset):.12f}")
-        return self
+    @staticmethod
+    def custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg):
+        bce = nn.BCELoss()(cls_pred, y_cls)
+        mask = (y_cls == 0).float()
+        if mask.sum() > 0:
+            mse = ((reg_pred.squeeze() - y_reg.squeeze()) ** 2 * mask).sum() / (mask.sum() + 1e-6)
+        else:
+            mse = torch.tensor(0.0, device=reg_pred.device)
+        return bce + mse
 
     def evaluate(self, val_dataset):
-        """
-        Evaluate the model on a validation dataset using custom_zi_loss (BCE + masked MSE).
-        Args:
-            val_dataset: PyTorch Dataset (X, y_cls, y_reg)
-        Returns:
-            loss: Average custom_zi_loss over the validation set
-        """
         device = next(self.parameters()).device
         self.eval()
         total_loss = 0
@@ -113,7 +124,7 @@ class ZeroInflatedLSTM(nn.Module):
                 y_cls = y_cls.to(device).unsqueeze(1)
                 y_reg = self.scale_y_reg(y_reg).to(device).unsqueeze(1)
                 cls_pred, reg_pred = self(X)
-                loss = custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg)
+                loss = self.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg)
                 total_loss += loss.item() * X.size(0)
                 n_samples += X.size(0)
         avg_loss = total_loss / n_samples if n_samples > 0 else float('inf')
@@ -134,12 +145,63 @@ class ZeroInflatedLSTM(nn.Module):
             reg_pred = self.target_reg_scaler.inverse_transform(reg_pred.reshape(-1, 1)).flatten()
         return reg_pred, cls_pred
 
+class ZeroInflatedTransformer(ZeroInflatedTSModule):
+    """
+    Transformer-based zero-inflated time series model.
+    Uses a transformer encoder to process sequential input data, with shared dense layers and separate
+    heads for classification (zero/non-zero) and regression (value prediction). Supports feature and target scaling.
+    """
+    def __init__(self, input_size, n_lags=1, d_model=32, num_heads=2, num_layers=2, dense_units=16, dropout=0.1):
+        super().__init__()
+        self.input_size = input_size
+        self.n_lags = n_lags
+        self.d_model = d_model
+        self.pos_encoder = nn.Parameter(torch.zeros(1, n_lags, d_model))
+        self.input_proj = nn.Linear(input_size, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads, dim_feedforward=d_model*2, dropout=dropout, batch_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.shared_dense = nn.Linear(d_model, dense_units)
+        self.classifier = nn.Linear(dense_units, 1)
+        self.regressor_dense = nn.Linear(dense_units, dense_units)
+        self.regressor = nn.Linear(dense_units, 1)
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
 
-def custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg):
-    bce = nn.BCELoss()(cls_pred, y_cls)
-    mask = (y_cls == 0).float()
-    if mask.sum() > 0:
-        mse = ((reg_pred.squeeze() - y_reg.squeeze()) ** 2 * mask).sum() / (mask.sum() + 1e-6)
-    else:
-        mse = torch.tensor(0.0, device=reg_pred.device)
-    return bce + mse
+    def forward(self, x):
+        # x: [batch, seq_len, input_size]
+        x = self.input_proj(x) + self.pos_encoder[:, :x.size(1), :]
+        x = self.transformer_encoder(x)
+        x = x[:, -1, :]  # Use last token
+        x = self.relu(self.shared_dense(x))
+        cls_out = self.sigmoid(self.classifier(x))
+        reg_x = self.relu(self.regressor_dense(x))
+        reg_out = self.regressor(reg_x)
+        return cls_out, reg_out
+
+
+class ZeroInflatedLSTM(ZeroInflatedTSModule):
+    """
+    LSTM-based zero-inflated time series model.
+    Uses an LSTM to process sequential input data, with shared dense layers and separate heads for
+    classification (zero/non-zero) and regression (value prediction). Supports feature and target scaling.
+    """
+    def __init__(self, input_size, n_lags=1, lstm_units=32, dense_units=16):
+        super().__init__()
+        self.lstm = nn.LSTM(input_size, lstm_units, batch_first=True)
+        self.shared_dense = nn.Linear(lstm_units, dense_units)
+        self.classifier = nn.Linear(dense_units, 1)
+        self.regressor_dense = nn.Linear(dense_units, dense_units)
+        self.regressor = nn.Linear(dense_units, 1)
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+        self._input_size = input_size
+        self.n_lags = n_lags
+
+    def forward(self, x):
+        lstm_out, _ = self.lstm(x)
+        x = lstm_out[:, -1, :]
+        x = self.relu(self.shared_dense(x))
+        cls_out = self.sigmoid(self.classifier(x))
+        reg_x = self.relu(self.regressor_dense(x))
+        reg_out = self.regressor(reg_x)
+        return cls_out, reg_out

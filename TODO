@@ -1,7 +1,8 @@
 Piority:
 - Ameliorate outlier removal mechanism and see correctness of processed data.
 - Make autoregressive testing part of the pipeline.
-- Implement early stopping.
+- Print out the cross-table after testing.
+- Should the base training really do early stopping, since training on multiple pools have not good prediction power on others? Can we somehow train the model sequentially on pools such that they validate on themselves?
 - Save supervised problem with at least 20 lags. Make LPsDataset load how many lags it wants (instead of preprocessing it itself).
 - Ensure that LP data is downloaded to scratch in the given supercomputer.
 - Create option to predict volume instead.

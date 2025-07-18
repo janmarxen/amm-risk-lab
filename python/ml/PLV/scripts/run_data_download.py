@@ -16,6 +16,7 @@ def main():
     parser.add_argument('--start_date', type=str, required=True)
     parser.add_argument('--end_date', type=str, required=True)
     parser.add_argument('--main_pool_address', type=str, required=False, default=None)
+    parser.add_argument('--n_pools', type=int, required=False, default=1000)
     args = parser.parse_args()
 
     print("[run_data_download.py] Configuration:")
@@ -29,9 +30,9 @@ def main():
     start_date = args.start_date
     end_date = args.end_date
     hdf5_path = os.path.join("python/ml/PLV/data", "uniswap_pools_data.h5")
-    min_rows = 100
+    min_rows = 50
     pool_tier = None  # 'LOW', 'MEDIUM', 'HIGH', or None for all
-    hdf5_mode = 'x'  # 'w' = overwrite, 'a' = append, 'x' = fail if exists
+    hdf5_mode = 'w'  # 'w' = overwrite, 'a' = append, 'x' = fail if exists
 
     # ---- Fetch pool addresses ----
     print("Fetching all pool addresses from subgraph...")
@@ -39,7 +40,7 @@ def main():
     pool_addresses = fetch_all_pool_addresses(api_key, subgraph_id, pool_tier=pool_tier)
     print(f"Found {len(pool_addresses)} pools.")
     random_shuffle(pool_addresses)
-    N = 1000
+    N = args.n_pools
     pool_addresses = pool_addresses[:N]
     # Always include main_pool_address if provided
     if args.main_pool_address and args.main_pool_address not in pool_addresses:
@@ -58,10 +59,6 @@ def main():
         min_rows=min_rows,
         mode=hdf5_mode
     )
-
-    # with pd.HDFStore(hdf5_path, "r") as store:
-    #     df = store["pool_0xcbcdf9626bc03e24f779434178a73a0b4bad62ed"]
-    #     print(df[["datetime", "liquidity", "liquidity_return"]].tail(50))
 
     print("Done.")
 
