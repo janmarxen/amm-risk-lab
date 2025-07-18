@@ -204,7 +204,7 @@ def main():
         y_reg_tensor = model.scale_y_reg(y_reg).unsqueeze(1)
         cls_pred, reg_pred = model(X_scaled)
         test_loss = model.__class__.custom_zi_loss(cls_pred, reg_pred, y_cls_tensor, y_reg_tensor).item()
-    print(f"ZeroInflatedLSTM test custom loss: {test_loss:.8f}")
+    print(f"Model's test custom loss: {test_loss:.8f}")
     # --- Naive baseline ---
     print("Calculating naive baseline...")
     y_reg_np = y_reg.numpy()
@@ -223,7 +223,7 @@ def main():
     # --- Plot ---
     print("Saving figures...")
     y_reg_pred[y_cls_pred==1] = 0  # Set predicted liquidity return to 0 where cls_pred is 1
-    save_actual_vs_predicted(y_reg_np, y_reg_pred, title=f"LSTM: Actual vs Predicted {target} (Test Set)", filename=f"lstm_actual_vs_predicted_{target}.png")
+    save_actual_vs_predicted(y_reg_np, y_reg_pred, title=f"Actual vs Predicted {target} (Test Set)", filename=f"{args.model_type}_actual_vs_predicted_{target}.png")
     save_actual_vs_predicted(y_reg_np[mask], naive_pred[mask], title=f"Naive: Actual vs Predicted {target} (Test Set)", filename=f"naive_actual_vs_predicted_{target}.png")
 
 if __name__ == "__main__":
