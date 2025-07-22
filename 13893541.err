@@ -1,0 +1,83 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) Stages/2025
+
+The following have been reloaded with a version change:
+  1) sympy/1.13.3 => sympy/1.13.1
+
+WARNING:__main__:
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+[W721 16:27:39.032301795 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0219i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+[W721 16:27:49.126281638 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0219i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+[W721 16:27:49.126276428 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0219i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+[W721 16:27:49.126325818 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0219i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+[W721 16:27:49.126886273 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0219i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 156, in <module>
+[rank3]:     main()
+[rank3]: TypeError: main() missing 1 required positional argument: 'args'
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 156, in <module>
+[rank2]:     main()
+[rank2]: TypeError: main() missing 1 required positional argument: 'args'
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 156, in <module>
+[rank1]:     main()
+[rank1]: TypeError: main() missing 1 required positional argument: 'args'
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 156, in <module>
+[rank0]:     main()
+[rank0]: TypeError: main() missing 1 required positional argument: 'args'
+W0721 16:34:09.499000 1514103 /p/software/fs/jurecadc/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 1514136 closing signal SIGTERM
+W0721 16:34:09.509000 1514103 /p/software/fs/jurecadc/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py:897] Sending process 1514137 closing signal SIGTERM
+E0721 16:34:09.629000 1514103 /p/software/fs/jurecadc/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 1514134) of binary: /p/home/jusers/marxen1/jureca/course/sc_venv_template/venv/bin/python3
+Traceback (most recent call last):
+  File "/p/home/jusers/marxen1/jureca/course/sc_venv_template/venv/bin/torchrun_jsc", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/p/project1/training2529/marxen1/amm-risk-lab/envs/jureca0/venv/lib/python3.12/site-packages/torchrun_jsc/__init__.py", line 44, in main
+    run_main()
+  File "/p/project1/training2529/marxen1/amm-risk-lab/envs/jureca0/venv/lib/python3.12/site-packages/torchrun_jsc/run.py", line 91, in main
+    runpy.run_module('torch.distributed.run', run_name='__main__')
+  File "<frozen runpy>", line 229, in run_module
+  File "<frozen runpy>", line 88, in _run_code
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/run.py", line 923, in <module>
+    main()
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/run.py", line 919, in main
+    run(args)
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/run.py", line 910, in run
+    elastic_launch(
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+python/ml/PLV/scripts/run_ddp_training.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2025-07-21_16:34:09
+  host      : jrc0219.jureca
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 1514135)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-07-21_16:34:09
+  host      : jrc0219.jureca
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 1514134)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+srun: error: jrc0219: task 0: Exited with exit code 1

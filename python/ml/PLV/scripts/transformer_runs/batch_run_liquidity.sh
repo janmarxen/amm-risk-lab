@@ -16,7 +16,7 @@ DENSE_UNITS=32
 DROPOUT=0.1
 LR=0.001
 EPOCHS=50
-N_POOLS=200
+N_POOLS=500
 MODEL_NAME="transformer_model_liquidity_0"
 FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,\
 liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,\
@@ -24,6 +24,8 @@ price_ma_3h,price_ma_6h,price_ma_24h,\
 liquidity_ma_3h,liquidity_ma_6h,liquidity_ma_24h,\
 hour,day_of_week,month,season"
 TARGET="liquidity_return"
+START_DATE="2023-01-01"
+END_DATE="2025-07-01"
 TRAIN_START="2023-01-01"
 TRAIN_END="2025-05-01"
 VAL_START="2025-05-02"
@@ -35,8 +37,10 @@ FINETUNE_EPOCHS=100
 FINETUNE_LR=0.001
 FINETUNE_BATCH_SIZE=16
 
+# Activate environment
+source /p/project1/training2529/marxen1/amm-risk-lab/envs/jureca0/activate.sh
 
-# Step 1: Download data 
+# # Step 1: Download data 
 # python3 -m python.ml.PLV.scripts.run_data_download \
 #     --api_key $API_KEY \
 #     --subgraph_id $SUBGRAPH_ID \
@@ -70,28 +74,28 @@ python3 -m python.ml.PLV.scripts.run_training \
     --target "$TARGET" \
     --model_type transformer
 
-# Step 3: Test model
-python3 -m python.ml.PLV.scripts.run_testing \
-    --n_lags $N_LAGS \
-    --batch_size $BATCH_SIZE \
-    --d_model $D_MODEL \
-    --num_heads $NUM_HEADS \
-    --num_layers $NUM_LAYERS \
-    --dense_units $DENSE_UNITS \
-    --dropout $DROPOUT \
-    --api_key $API_KEY \
-    --subgraph_id $SUBGRAPH_ID \
-    --train_start $TRAIN_START \
-    --train_end $TRAIN_END \
-    --val_start $VAL_START \
-    --val_end $VAL_END \
-    --test_start $TEST_START \
-    --test_end $TEST_END \
-    --model_name $MODEL_NAME \
-    --main_pool_address $MAIN_POOL_ADDRESS \
-    --finetune_epochs $FINETUNE_EPOCHS \
-    --finetune_lr $FINETUNE_LR \
-    --finetune_batch_size $FINETUNE_BATCH_SIZE \
-    --features "$FEATURES" \
-    --target "$TARGET" \
-    --model_type transformer
+# # Step 3: Test model
+# python3 -m python.ml.PLV.scripts.run_testing \
+#     --n_lags $N_LAGS \
+#     --batch_size $BATCH_SIZE \
+#     --d_model $D_MODEL \
+#     --num_heads $NUM_HEADS \
+#     --num_layers $NUM_LAYERS \
+#     --dense_units $DENSE_UNITS \
+#     --dropout $DROPOUT \
+#     --api_key $API_KEY \
+#     --subgraph_id $SUBGRAPH_ID \
+#     --train_start $TRAIN_START \
+#     --train_end $TRAIN_END \
+#     --val_start $VAL_START \
+#     --val_end $VAL_END \
+#     --test_start $TEST_START \
+#     --test_end $TEST_END \
+#     --model_name $MODEL_NAME \
+#     --main_pool_address $MAIN_POOL_ADDRESS \
+#     --finetune_epochs $FINETUNE_EPOCHS \
+#     --finetune_lr $FINETUNE_LR \
+#     --finetune_batch_size $FINETUNE_BATCH_SIZE \
+#     --features "$FEATURES" \
+#     --target "$TARGET" \
+#     --model_type transformer

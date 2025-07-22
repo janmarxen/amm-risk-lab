@@ -1,9 +1,101 @@
 import abc
 import torch
 import torch.nn as nn
+import torch.distributed as dist
 from sklearn.preprocessing import StandardScaler
 
 class ZeroInflatedTSModule(nn.Module, abc.ABC):
+
+    def fit_distributed(self, train_loader, epochs=20, lr=0.001, verbose=1, val_loader=None, early_stopping_patience=10, device=None):
+        """
+        Distributed training loop using DataLoader and DDP. Assumes model is already wrapped in DDP and on correct device.
+        Args:
+            train_loader: DataLoader for training data
+            epochs: Number of epochs
+            lr: Learning rate
+            verbose: Print progress if True (should be rank 0 only)
+            val_loader: Optional validation DataLoader
+            early_stopping_patience: Number of epochs to wait for improvement
+            device: torch.device
+        """
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        best_val_loss = float('inf')
+        best_state = None
+        patience_counter = 0
+        for epoch in range(epochs):
+            self.train()
+            total_loss = 0
+            for X, y_cls, y_reg in train_loader:
+                X_np = X.cpu().numpy()
+                n_samples, n_lags, n_features = X_np.shape
+                X_reshaped = X_np.reshape(-1, n_features)
+                y_reg_np = y_reg.cpu().numpy().reshape(-1, 1)
+                self.feature_scaler.partial_fit(X_reshaped)
+                self.target_reg_scaler.partial_fit(y_reg_np)
+                X_scaled = self.feature_scaler.transform(X_reshaped).reshape(n_samples, n_lags, n_features)
+                y_reg_scaled = self.target_reg_scaler.transform(y_reg_np).flatten()
+                X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=device)
+                y_cls = y_cls.to(device).unsqueeze(1)
+                y_reg_tensor = torch.tensor(y_reg_scaled, dtype=torch.float32, device=device).unsqueeze(1)
+                optimizer.zero_grad()
+                cls_pred, reg_pred = self(X_tensor)
+                loss = self.__class__.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg_tensor)
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item() * X.size(0)
+            # Distributed average loss
+            total_loss_tensor = torch.tensor(total_loss, device=device)
+            n_samples_tensor = torch.tensor(len(train_loader.dataset), device=device)
+            dist.all_reduce(total_loss_tensor, op=dist.ReduceOp.SUM)
+            dist.all_reduce(n_samples_tensor, op=dist.ReduceOp.SUM)
+            avg_train_loss = (total_loss_tensor / n_samples_tensor).item() if n_samples_tensor.item() > 0 else float('inf')
+            val_loss = None
+            if val_loader is not None:
+                val_loss = self.evaluate_distributed(val_loader, device=device)
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_state = {k: v.cpu().clone() for k, v in self.state_dict().items()}
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                if verbose:
+                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.12f}, Val Loss: {val_loss:.12f}")
+                if patience_counter >= early_stopping_patience:
+                    if verbose:
+                        print(f"Early stopping at epoch {epoch+1}. Best Val Loss: {best_val_loss:.12f}")
+                    if best_state is not None:
+                        self.load_state_dict(best_state)
+                    break
+            else:
+                if verbose and (epoch % 5 == 0 or epoch == epochs-1):
+                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.12f}")
+        # Restore best weights if early stopping was used
+        if val_loader is not None and best_state is not None:
+            self.load_state_dict(best_state)
+        return self
+
+    def evaluate_distributed(self, val_loader, device=None):
+        """
+        Distributed evaluation loop using DataLoader and DDP. Returns global average loss.
+        """
+        self.eval()
+        total_loss = 0
+        n_samples = 0
+        with torch.no_grad():
+            for X, y_cls, y_reg in val_loader:
+                X = self.scale_X(X).to(device)
+                y_cls = y_cls.to(device).unsqueeze(1)
+                y_reg = self.scale_y_reg(y_reg).to(device).unsqueeze(1)
+                cls_pred, reg_pred = self(X)
+                loss = self.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg)
+                total_loss += loss.item() * X.size(0)
+                n_samples += X.size(0)
+        total_loss_tensor = torch.tensor(total_loss, device=device)
+        n_samples_tensor = torch.tensor(n_samples, device=device)
+        dist.all_reduce(total_loss_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(n_samples_tensor, op=dist.ReduceOp.SUM)
+        avg_loss = (total_loss_tensor / n_samples_tensor).item() if n_samples_tensor.item() > 0 else float('inf')
+        return avg_loss
     """
     Abstract base class for zero-inflated time series models.
     Provides common scaling, training, evaluation, and prediction utilities for time series models

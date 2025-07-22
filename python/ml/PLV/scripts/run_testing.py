@@ -74,7 +74,8 @@ def main():
     main_pool_address = args.main_pool_address
     model_name = args.model_name
     # --- Config ---
-    hdf5_path = os.path.join("python/ml/PLV/data", "uniswap_pools_data.h5")
+    # hdf5_path = os.path.join("python/ml/PLV/data", "uniswap_pools_data.h5")
+    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data.h5")
     model_path = os.path.join("python/ml/PLV/models", f"{model_name}.pt")
     if args.features is not None:
         features = [f.strip() for f in args.features.split(',')]

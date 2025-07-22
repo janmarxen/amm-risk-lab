@@ -131,52 +131,105 @@ def fetch_and_save_pools(
     Each pool is saved under key /pool_<address>. Metadata is saved under /meta.
     mode: 'w' (overwrite pool), 'a' (append/update pool), 'x' (skip if pool exists)
     """
-    # Always open the HDF5 file in append mode
-    store = pd.HDFStore(hdf5_path, mode='a')
+    import h5py
     fetched = []
     total = len(pool_addresses)
-    for idx, addr in enumerate(pool_addresses, 1):
-        pool_key = f'pool_{addr.lower()}'
-        if mode == 'x' and pool_key in store:
-            print(f"[{idx}/{total}] Skipping {addr}: already exists in {hdf5_path}")
-            continue
-        df = fetch_pool_hourly_data(api_key, subgraph_id, addr, start_date, end_date)
-        n = len(df)
-        if df is not None and n >= min_rows:
-            print(f"[{idx}/{total}] Fetching {addr} with {n} rows")
-            df = feature_engineer(df)
-            store.put(pool_key, df, format='table')
-            fetched.append(addr.lower())
-        else:
-            print(f"[{idx}/{total}] Skipping {addr}: insufficient data")
-    # Save metadata
-    meta = pd.DataFrame({
-        'pool_addresses': [','.join(fetched)],  # Store as comma-separated string for native type
-        'fetch_time': [time.time()]
-    })
-    store.put('meta', meta)
-    store.close()
+    # Open HDF5 file in append mode
+    with h5py.File(hdf5_path, 'a') as h5f:
+        for idx, addr in enumerate(pool_addresses, 1):
+            pool_key = f'pool_{addr.lower()}'
+            if mode == 'x' and pool_key in h5f:
+                print(f"[{idx}/{total}] Skipping {addr}: already exists in {hdf5_path}")
+                continue
+            df = fetch_pool_hourly_data(api_key, subgraph_id, addr, start_date, end_date)
+            n = len(df)
+            if df is not None and n >= min_rows:
+                print(f"[{idx}/{total}] Fetching {addr} with {n} rows")
+                df = feature_engineer(df)
+                # Split columns by dtype
+                num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+                str_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
+                grp = h5f.require_group(pool_key)
+                # Remove existing datasets if overwriting
+                if pool_key in h5f and mode == 'w':
+                    for k in list(grp.keys()):
+                        del grp[k]
+                # Save numeric data
+                if num_cols:
+                    grp.create_dataset('data', data=df[num_cols].to_numpy(), compression='gzip', chunks=True)
+                    dt = h5py.string_dtype(encoding='utf-8')
+                    grp.create_dataset('num_columns', data=np.array(num_cols, dtype=object), dtype=dt)
+                # Save string/object data
+                if str_cols:
+                    str_data = df[str_cols].astype(str).to_numpy()
+                    dt = h5py.string_dtype(encoding='utf-8')
+                    grp.create_dataset('strings', data=str_data, dtype=dt, compression='gzip', chunks=True)
+                    grp.create_dataset('str_columns', data=np.array(str_cols, dtype=object), dtype=dt)
+                fetched.append(addr.lower())
+            else:
+                print(f"[{idx}/{total}] Skipping {addr}: insufficient data")
+        # Save metadata
+        meta_grp = h5f.require_group('meta')
+        meta_grp.attrs['pool_addresses'] = ','.join(fetched)
+        meta_grp.attrs['fetch_time'] = time.time()
     print(f"Saved {len(fetched)} pools to {hdf5_path}")
 
 def load_pool_data(hdf5_path: str, pool_address: str) -> pd.DataFrame:
     """
-    Load a single pool's data from HDF5.
+    Load a single pool's data from HDF5 using h5py.
     """
-    with pd.HDFStore(hdf5_path, mode='r') as store:
-        key = f'pool_{pool_address.lower()}'
-        return store[key]
+    import h5py
+    pool_key = f'pool_{pool_address.lower()}'
+    with h5py.File(hdf5_path, 'r') as h5f:
+        if pool_key not in h5f:
+            raise KeyError(f"Pool {pool_address} not found in {hdf5_path}")
+        grp = h5f[pool_key]
+        dfs = []
+        # Numeric columns
+        if 'data' in grp and 'num_columns' in grp:
+            data = grp['data'][()]
+            num_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['num_columns'][()]]
+            dfs.append(pd.DataFrame(data, columns=num_columns))
+        # String columns
+        if 'strings' in grp and 'str_columns' in grp:
+            str_data = grp['strings'][()]
+            str_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['str_columns'][()]]
+            dfs.append(pd.DataFrame(str_data, columns=str_columns))
+        if dfs:
+            df = pd.concat(dfs, axis=1)
+            # Convert 'datetime' column to pandas datetime if present, via string
+            if 'datetime' in df.columns:
+                df['datetime'] = pd.to_datetime(df['datetime'].astype(str), errors='coerce')
+            return df
+        else:
+            raise ValueError(f"No data found for pool {pool_address} in {hdf5_path}")
 
 def load_all_pools_in_memory(hdf5_path: str) -> Dict[str, pd.DataFrame]:
     """
-    Load all pools' data from HDF5 as a dict of address -> DataFrame, kept in memory.
+    Load all pools' data from HDF5 as a dict of address -> DataFrame, kept in memory, using h5py.
     """
-    with pd.HDFStore(hdf5_path, mode='r') as store:
-        pools = [k[1:] for k in store.keys() if k.startswith('/pool_')]
-        pool_dict = {}
-        for p in pools:
-            addr = p[5:]
-            pool_dict[addr] = store[p]
-        return pool_dict
+    import h5py
+    pool_dict = {}
+    with h5py.File(hdf5_path, 'r') as h5f:
+        for key in h5f.keys():
+            if key.startswith('pool_'):
+                addr = key[5:]
+                grp = h5f[key]
+                dfs = []
+                if 'data' in grp and 'num_columns' in grp:
+                    data = grp['data'][()]
+                    num_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['num_columns'][()]]
+                    dfs.append(pd.DataFrame(data, columns=num_columns))
+                if 'strings' in grp and 'str_columns' in grp:
+                    str_data = grp['strings'][()]
+                    str_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['str_columns'][()]]
+                    dfs.append(pd.DataFrame(str_data, columns=str_columns))
+                if dfs:
+                    df = pd.concat(dfs, axis=1)
+                    if 'datetime' in df.columns:
+                        df['datetime'] = pd.to_datetime(df['datetime'].astype(str), errors='coerce')
+                    pool_dict[addr] = df
+    return pool_dict
 
 def make_lps_dataset_from_pool_dict(
     pool_dict: Dict[str, pd.DataFrame],
@@ -251,13 +304,18 @@ def make_lps_dataset_from_pool_dict(
 
 def get_saved_pool_addresses(hdf5_path: str) -> List[str]:
     """
-    Return the list of pool addresses saved in the HDF5 file.
+    Return the list of pool addresses saved in the HDF5 file using h5py.
     """
-    with pd.HDFStore(hdf5_path, mode='r') as store:
-        if 'meta' in store:
-            meta = store['meta']
-            return list(meta['pool_addresses'].iloc[0].split(','))  # Split comma-separated string
-        pools = [k[1:] for k in store.keys() if k.startswith('/pool_')]
+    import h5py
+    with h5py.File(hdf5_path, 'r') as h5f:
+        if 'meta' in h5f:
+            meta_grp = h5f['meta']
+            pool_addresses_str = meta_grp.attrs.get('pool_addresses', '')
+            if isinstance(pool_addresses_str, bytes):
+                pool_addresses_str = pool_addresses_str.decode('utf-8')
+            return [addr for addr in pool_addresses_str.split(',') if addr]
+        # Fallback: find all pool groups
+        pools = [k for k in h5f.keys() if k.startswith('pool_')]
         return [p[5:] for p in pools]
 
 class LPsDataset(Dataset):
@@ -336,8 +394,6 @@ class LPsDataset(Dataset):
             self.X.extend(X)
             self.y_cls.extend(y_cls)
             self.y_reg.extend(y_reg)
-            if verbose:
-                print(f"{idx}/{total}: Pool {addr} Dataset processed")
         if self.X:
             self.X = torch.tensor(np.array(self.X), dtype=torch.float32)  # Convert list of arrays to single ndarray first
             self.y_cls = torch.tensor(self.y_cls, dtype=torch.float32)

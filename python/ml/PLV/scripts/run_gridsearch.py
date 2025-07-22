@@ -73,201 +73,122 @@ def main():
     lr_grid = [float(x) for x in args.lr_list.split(',')]
     epochs_grid = [int(x) for x in args.epochs_list.split(',')]
 
+    # --- Unified grid search for both model types ---
     if args.model_type == "lstm":
-        lstm_units_grid = [int(x) for x in args.lstm_units_list.split(',')] if args.lstm_units_list else [32]
-        grid = list(itertools.product(n_lags_grid, batch_size_grid, lstm_units_grid, dense_units_grid, lr_grid, epochs_grid))
-        print(f"Grid search over {len(grid)} combinations.")
-        best_loss = float('inf')
-        best_model_state = None
-        best_model_path = None
-        best_params = None
-        for i, (n_lags, batch_size, lstm_units, dense_units, lr, epochs) in enumerate(grid, 1):
-            print(f"\n[GridSearch] Combination {i}/{len(grid)}: n_lags={n_lags}, batch_size={batch_size}, lstm_units={lstm_units}, dense_units={dense_units}, lr={lr}, epochs={epochs}")
-            train_dataset = LPsDataset(
-                hdf5_path=hdf5_path,
-                pool_addresses=pool_addresses,
-                features=features,
-                target=target,
-                n_lags=n_lags,
-                split='train',
-                split_dates=split_dates
-            )
-            val_dataset = LPsDataset(
-                hdf5_path=hdf5_path,
-                pool_addresses=pool_addresses,
-                features=features,
-                target=target,
-                n_lags=n_lags,
-                split='val',
-                split_dates=split_dates
-            )
-            print(f"Number of training samples: {len(train_dataset)}")
-            print(f"Number of validation samples: {len(val_dataset)}")
-            input_size = len(features)+1
-            model = ZeroInflatedLSTM(
-                input_size=input_size,
-                n_lags=n_lags,
-                lstm_units=lstm_units,
-                dense_units=dense_units
-            )
-            model.fit(
-                train_dataset,
-                epochs=epochs,
-                batch_size=batch_size,
-                lr=lr,
-                verbose=1,
-                val_dataset=val_dataset,
-                early_stopping_patience=20
-            )
-            print("Model training complete.")
-            finetune_dataset = LPsDataset(
-                hdf5_path=hdf5_path,
-                pool_addresses=[args.main_pool_address],
-                features=features,
-                target=target,
-                n_lags=n_lags,
-                split='train',
-                split_dates={'train_start': split_dates['train_start'], 'train_end': split_dates['val_end']}
-            )
-            finetune_val_dataset = LPsDataset(
-                hdf5_path=hdf5_path,
-                pool_addresses=[args.main_pool_address],
-                features=features,
-                target=target,
-                n_lags=n_lags,
-                split='val',
-                split_dates={'val_start': split_dates['val_start'], 'val_end': split_dates['val_end']}
-            )
-            if len(finetune_dataset) == 0 or len(finetune_val_dataset) == 0:
-                print("Skipping finetuning for this grid point: no data for main pool.")
-                continue
-            model.fit(
-                finetune_dataset,
-                epochs=epochs,
-                batch_size=batch_size,
-                lr=lr,
-                verbose=1,
-                val_dataset=finetune_val_dataset,
-                early_stopping_patience=10
-            )
-            print("Finetuning complete.")
-            val_loss = model.evaluate(finetune_val_dataset)
-            print(f"Custom loss on main pool validation: {val_loss:.8f}")
-            if val_loss < best_loss:
-                best_loss = val_loss
-                best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-                best_params = (n_lags, batch_size, lstm_units, dense_units, lr, epochs)
-                best_model_path = os.path.join(model_dir, f"{args.model_name}_BEST.pt")
-                print("New best model found!")
-        if best_model_state is not None:
-            torch.save(best_model_state, best_model_path)
-            print(f"Best model saved to {best_model_path}")
-            print(f"Best params: n_lags={best_params[0]}, batch_size={best_params[1]}, lstm_units={best_params[2]}, dense_units={best_params[3]}, lr={best_params[4]}, epochs={best_params[5]}")
-            print(f"Best custom loss: {best_loss:.8f}")
-        else:
-            print("No valid model was trained and finetuned.")
+        model_class = ZeroInflatedLSTM
+        param_grid = list(itertools.product(n_lags_grid, batch_size_grid, [int(x) for x in args.lstm_units_list.split(',')] if args.lstm_units_list else [32], dense_units_grid, lr_grid, epochs_grid))
+        param_names = ["n_lags", "batch_size", "lstm_units", "dense_units", "lr", "epochs"]
     elif args.model_type == "transformer":
+        model_class = ZeroInflatedTransformer
         d_model_grid = [int(x) for x in args.d_model_list.split(',')] if args.d_model_list else [32]
         num_heads_grid = [int(x) for x in args.num_heads_list.split(',')] if args.num_heads_list else [2]
         num_layers_grid = [int(x) for x in args.num_layers_list.split(',')] if args.num_layers_list else [2]
         dropout_grid = [float(x) for x in args.dropout_list.split(',')] if args.dropout_list else [0.1]
-        grid = list(itertools.product(n_lags_grid, batch_size_grid, d_model_grid, num_heads_grid, num_layers_grid, dense_units_grid, dropout_grid, lr_grid, epochs_grid))
-        print(f"Grid search over {len(grid)} combinations.")
-        best_loss = float('inf')
-        best_model_state = None
-        best_model_path = None
-        best_params = None
-        for i, (n_lags, batch_size, d_model, num_heads, num_layers, dense_units, dropout, lr, epochs) in enumerate(grid, 1):
-            print(f"\n[GridSearch] Combination {i}/{len(grid)}: n_lags={n_lags}, batch_size={batch_size}, d_model={d_model}, num_heads={num_heads}, num_layers={num_layers}, dense_units={dense_units}, dropout={dropout}, lr={lr}, epochs={epochs}")
-            train_dataset = LPsDataset(
-                hdf5_path=hdf5_path,
-                pool_addresses=pool_addresses,
-                features=features,
-                target=target,
-                n_lags=n_lags,
-                split='train',
-                split_dates=split_dates
-            )
-            val_dataset = LPsDataset(
-                hdf5_path=hdf5_path,
-                pool_addresses=pool_addresses,
-                features=features,
-                target=target,
-                n_lags=n_lags,
-                split='val',
-                split_dates=split_dates
-            )
-            print(f"Number of training samples: {len(train_dataset)}")
-            print(f"Number of validation samples: {len(val_dataset)}")
-            input_size = len(features)+1
-            model = ZeroInflatedTransformer(
-                input_size=input_size,
-                n_lags=n_lags,
-                d_model=d_model,
-                num_heads=num_heads,
-                num_layers=num_layers,
-                dense_units=dense_units,
-                dropout=dropout
-            )
-            model.fit(
-                train_dataset,
-                epochs=epochs,
-                batch_size=batch_size,
-                lr=lr,
-                verbose=1,
-                val_dataset=val_dataset,
-                early_stopping_patience=20
-            )
-            print("Model training complete.")
-            finetune_dataset = LPsDataset(
-                hdf5_path=hdf5_path,
-                pool_addresses=[args.main_pool_address],
-                features=features,
-                target=target,
-                n_lags=n_lags,
-                split='train',
-                split_dates={'train_start': split_dates['train_start'], 'train_end': split_dates['val_end']}
-            )
-            finetune_val_dataset = LPsDataset(
-                hdf5_path=hdf5_path,
-                pool_addresses=[args.main_pool_address],
-                features=features,
-                target=target,
-                n_lags=n_lags,
-                split='val',
-                split_dates={'val_start': split_dates['val_start'], 'val_end': split_dates['val_end']}
-            )
-            if len(finetune_dataset) == 0 or len(finetune_val_dataset) == 0:
-                print("Skipping finetuning for this grid point: no data for main pool.")
-                continue
-            model.fit(
-                finetune_dataset,
-                epochs=epochs,
-                batch_size=batch_size,
-                lr=lr,
-                verbose=1,
-                val_dataset=finetune_val_dataset,
-                early_stopping_patience=10
-            )
-            print("Finetuning complete.")
-            val_loss = model.evaluate(finetune_val_dataset)
-            print(f"Custom loss on main pool validation: {val_loss:.8f}")
-            if val_loss < best_loss:
-                best_loss = val_loss
-                best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-                best_params = (n_lags, batch_size, d_model, num_heads, num_layers, dense_units, dropout, lr, epochs)
-                best_model_path = os.path.join(model_dir, f"{args.model_name}_BEST.pt")
-                print("New best model found!")
-        if best_model_state is not None:
-            torch.save(best_model_state, best_model_path)
-            print(f"Best model saved to {best_model_path}")
-            print(f"Best params: n_lags={best_params[0]}, batch_size={best_params[1]}, d_model={best_params[2]}, num_heads={best_params[3]}, num_layers={best_params[4]}, dense_units={best_params[5]}, dropout={best_params[6]}, lr={best_params[7]}, epochs={best_params[8]}")
-            print(f"Best custom loss: {best_loss:.8f}")
-        else:
-            print("No valid model was trained and finetuned.")
+        param_grid = list(itertools.product(n_lags_grid, batch_size_grid, d_model_grid, num_heads_grid, num_layers_grid, dense_units_grid, dropout_grid, lr_grid, epochs_grid))
+        param_names = ["n_lags", "batch_size", "d_model", "num_heads", "num_layers", "dense_units", "dropout", "lr", "epochs"]
     else:
         print(f"Unknown model_type: {args.model_type}")
         sys.exit(1)
+
+    print(f"Grid search over {len(param_grid)} combinations.")
+    best_loss = float('inf')
+    best_model_state = None
+    best_model_path = None
+    best_params = None
+    for i, params in enumerate(param_grid, 1):
+        param_dict = dict(zip(param_names, params))
+        print(f"\n[GridSearch] Combination {i}/{len(param_grid)}: " + ", ".join(f"{k}={v}" for k, v in param_dict.items()))
+        n_lags = param_dict["n_lags"]
+        batch_size = param_dict["batch_size"]
+        dense_units = param_dict["dense_units"]
+        lr = param_dict["lr"]
+        epochs = param_dict["epochs"]
+        # Model-specific params
+        model_kwargs = dict(input_size=len(features)+1, n_lags=n_lags, dense_units=dense_units)
+        if args.model_type == "lstm":
+            model_kwargs["lstm_units"] = param_dict["lstm_units"]
+        else:
+            model_kwargs["d_model"] = param_dict["d_model"]
+            model_kwargs["num_heads"] = param_dict["num_heads"]
+            model_kwargs["num_layers"] = param_dict["num_layers"]
+            model_kwargs["dropout"] = param_dict["dropout"]
+        train_dataset = LPsDataset(
+            hdf5_path=hdf5_path,
+            pool_addresses=pool_addresses,
+            features=features,
+            target=target,
+            n_lags=n_lags,
+            split='train',
+            split_dates=split_dates
+        )
+        val_dataset = LPsDataset(
+            hdf5_path=hdf5_path,
+            pool_addresses=pool_addresses,
+            features=features,
+            target=target,
+            n_lags=n_lags,
+            split='val',
+            split_dates=split_dates
+        )
+        print(f"Number of training samples: {len(train_dataset)}")
+        print(f"Number of validation samples: {len(val_dataset)}")
+        model = model_class(**model_kwargs)
+        model.fit(
+            train_dataset,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            verbose=1,
+            val_dataset=val_dataset,
+            early_stopping_patience=20
+        )
+        print("Model training complete.")
+        finetune_dataset = LPsDataset(
+            hdf5_path=hdf5_path,
+            pool_addresses=[args.main_pool_address],
+            features=features,
+            target=target,
+            n_lags=n_lags,
+            split='train',
+            split_dates={'train_start': split_dates['train_start'], 'train_end': split_dates['val_end']}
+        )
+        finetune_val_dataset = LPsDataset(
+            hdf5_path=hdf5_path,
+            pool_addresses=[args.main_pool_address],
+            features=features,
+            target=target,
+            n_lags=n_lags,
+            split='val',
+            split_dates={'val_start': split_dates['val_start'], 'val_end': split_dates['val_end']}
+        )
+        if len(finetune_dataset) == 0 or len(finetune_val_dataset) == 0:
+            print("Skipping finetuning for this grid point: no data for main pool.")
+            continue
+        model.fit(
+            finetune_dataset,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            verbose=1,
+            val_dataset=finetune_val_dataset,
+            early_stopping_patience=10
+        )
+        print("Finetuning complete.")
+        val_loss = model.evaluate(finetune_val_dataset)
+        print(f"Custom loss on main pool validation: {val_loss:.8f}")
+        if val_loss < best_loss:
+            best_loss = val_loss
+            best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_params = params
+            best_model_path = os.path.join(model_dir, f"{args.model_name}_BEST.pt")
+            print("New best model found!")
+    if best_model_state is not None:
+        torch.save(best_model_state, best_model_path)
+        print(f"Best model saved to {best_model_path}")
+        print("Best params: " + ", ".join(f"{k}={v}" for k, v in zip(param_names, best_params)))
+        print(f"Best custom loss: {best_loss:.8f}")
+    else:
+        print("No valid model was trained and finetuned.")
 
 if __name__ == "__main__":
     main()

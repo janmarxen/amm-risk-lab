@@ -43,7 +43,8 @@ def main():
     sys.stdout.flush()
 
     # --- User configuration ---
-    hdf5_path = os.path.join("python/ml/PLV/data", "uniswap_pools_data.h5")
+    # hdf5_path = os.path.join("python/ml/PLV/data", "uniswap_pools_data.h5")
+    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data.h5")
     model_dir = os.path.join("python/ml/PLV/models")
     model_path = os.path.join(model_dir, f"{args.model_name}.pt")
 

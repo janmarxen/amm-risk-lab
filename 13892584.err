@@ -1,0 +1,174 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) Stages/2025
+
+The following have been reloaded with a version change:
+  1) sympy/1.13.3 => sympy/1.13.1
+
+WARNING:__main__:
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+WARNING:__main__:
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+[W721 14:08:24.693727422 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0425i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+[W721 14:08:24.588895011 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0425i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+Traceback (most recent call last):
+  File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 13, in <module>
+    from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
+ModuleNotFoundError: No module named 'python'
+Traceback (most recent call last):
+  File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 13, in <module>
+Traceback (most recent call last):
+  File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 13, in <module>
+    from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
+ModuleNotFoundError: No module named 'python'
+    from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
+ModuleNotFoundError: No module named 'python'
+Traceback (most recent call last):
+  File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 13, in <module>
+    from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
+ModuleNotFoundError: No module named 'python'
+Traceback (most recent call last):
+  File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 13, in <module>
+    from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
+ModuleNotFoundError: No module named 'python'
+Traceback (most recent call last):
+  File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 13, in <module>
+    from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
+ModuleNotFoundError: No module named 'python'
+Traceback (most recent call last):
+  File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 13, in <module>
+    from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
+ModuleNotFoundError: No module named 'python'
+Traceback (most recent call last):
+  File "/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/scripts/run_ddp_training.py", line 13, in <module>
+    from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
+ModuleNotFoundError: No module named 'python'
+E0721 14:08:27.632000 2039900 /p/software/fs/jurecadc/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 2039932) of binary: /p/home/jusers/marxen1/jureca/course/sc_venv_template/venv/bin/python3
+E0721 14:08:27.636000 3729599 /p/software/fs/jurecadc/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 3729629) of binary: /p/home/jusers/marxen1/jureca/course/sc_venv_template/venv/bin/python3
+Traceback (most recent call last):
+  File "/p/home/jusers/marxen1/jureca/course/sc_venv_template/venv/bin/torchrun_jsc", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/p/project1/training2529/marxen1/amm-risk-lab/envs/jureca0/venv/lib/python3.12/site-packages/torchrun_jsc/__init__.py", line 44, in main
+    run_main()
+  File "/p/project1/training2529/marxen1/amm-risk-lab/envs/jureca0/venv/lib/python3.12/site-packages/torchrun_jsc/run.py", line 91, in main
+    runpy.run_module('torch.distributed.run', run_name='__main__')
+  File "<frozen runpy>", line 229, in run_module
+  File "<frozen runpy>", line 88, in _run_code
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/run.py", line 923, in <module>
+    main()
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/run.py", line 919, in main
+    run(args)
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/run.py", line 910, in run
+    elastic_launch(
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+python/ml/PLV/scripts/run_ddp_training.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2025-07-21_14:08:27
+  host      : jrc0425.jureca
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 2039933)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2025-07-21_14:08:27
+  host      : jrc0425.jureca
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 2039934)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2025-07-21_14:08:27
+  host      : jrc0425.jureca
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 2039935)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-07-21_14:08:27
+  host      : jrc0425.jureca
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 2039932)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+Traceback (most recent call last):
+  File "/p/home/jusers/marxen1/jureca/course/sc_venv_template/venv/bin/torchrun_jsc", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/p/project1/training2529/marxen1/amm-risk-lab/envs/jureca0/venv/lib/python3.12/site-packages/torchrun_jsc/__init__.py", line 44, in main
+    run_main()
+  File "/p/project1/training2529/marxen1/amm-risk-lab/envs/jureca0/venv/lib/python3.12/site-packages/torchrun_jsc/run.py", line 91, in main
+    runpy.run_module('torch.distributed.run', run_name='__main__')
+  File "<frozen runpy>", line 229, in run_module
+  File "<frozen runpy>", line 88, in _run_code
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/run.py", line 923, in <module>
+    main()
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/run.py", line 919, in main
+    run(args)
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/run.py", line 910, in run
+    elastic_launch(
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/p/software/default/stages/2025/software/PyTorch/2.5.1-gcccoreflexiblas-13.3.0-3.4.4/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+python/ml/PLV/scripts/run_ddp_training.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2025-07-21_14:08:27
+  host      : jrc0438.jureca
+  rank      : 5 (local_rank: 1)
+  exitcode  : 1 (pid: 3729630)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2025-07-21_14:08:27
+  host      : jrc0438.jureca
+  rank      : 6 (local_rank: 2)
+  exitcode  : 1 (pid: 3729631)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2025-07-21_14:08:27
+  host      : jrc0438.jureca
+  rank      : 7 (local_rank: 3)
+  exitcode  : 1 (pid: 3729632)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-07-21_14:08:27
+  host      : jrc0438.jureca
+  rank      : 4 (local_rank: 0)
+  exitcode  : 1 (pid: 3729629)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+srun: error: jrc0438: task 1: Exited with exit code 1
+srun: error: jrc0425: task 0: Exited with exit code 1
