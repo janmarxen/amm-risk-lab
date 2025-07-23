@@ -1,5 +1,6 @@
 import os
 import torch
+from torch.utils.data import DataLoader
 from random import shuffle
 import random
 import argparse
@@ -105,6 +106,8 @@ def main():
     )
     print(f"Number of training samples: {len(train_dataset)}")
     print(f"Number of validation samples: {len(val_dataset)}")
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     # --- Train model ---
     print("Training model with early stopping...")
     input_size = len(features)+1 # +1 for the target variable
@@ -129,12 +132,11 @@ def main():
         print(f"Unknown model_type: {args.model_type}")
         sys.exit(1)
     model.fit(
-        train_dataset,
+        train_loader,
         epochs=epochs,
-        batch_size=batch_size,
         lr=lr,
         verbose=1,
-        val_dataset=val_dataset,
+        val_loader=val_loader,
         early_stopping_patience=20
     )
     print("Model training complete.")

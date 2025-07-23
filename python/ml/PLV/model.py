@@ -108,20 +108,20 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         self.feature_scaler = StandardScaler()
         self.target_reg_scaler = StandardScaler()
 
-    def fit(self, train_dataset, epochs=20, batch_size=64, lr=0.001, verbose=1, val_dataset=None, early_stopping_patience=10):
+    def fit(self, train_loader, epochs=20, lr=0.001, verbose=1, val_loader=None, early_stopping_patience=10):
         """
-        Train the model using a PyTorch Dataset and DataLoader, with incremental scaling.
+        Train the model using a PyTorch DataLoader, with incremental scaling.
         Args:
-            train_dataset: PyTorch Dataset (X, y_cls, y_reg)
+            train_loader: PyTorch DataLoader (X, y_cls, y_reg)
             epochs: Number of epochs
-            batch_size: Batch size
             lr: Learning rate
             verbose: Print progress if True
-            val_dataset: Optional validation dataset for early stopping
+            val_loader: Optional validation DataLoader for early stopping
             early_stopping_patience: Number of epochs to wait for improvement
         """
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.to(device)
+        print(f"[fit] Using device: {device} (type: {device.type})")
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         best_val_loss = float('inf')
         best_state = None
@@ -129,8 +129,7 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         for epoch in range(epochs):
             self.train()
             total_loss = 0
-            loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-            for X, y_cls, y_reg in loader:
+            for X, y_cls, y_reg in train_loader:
                 # Incrementally fit scalers on this batch
                 X_np = X.numpy()
                 n_samples, n_lags, n_features = X_np.shape
@@ -151,8 +150,8 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
                 optimizer.step()
                 total_loss += loss.item() * X.size(0)
             val_loss = None
-            if val_dataset is not None:
-                val_loss = self.evaluate(val_dataset)
+            if val_loader is not None:
+                val_loss = self.evaluate(val_loader)
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
                     best_state = {k: v.cpu().clone() for k, v in self.state_dict().items()}
@@ -160,7 +159,7 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
                 else:
                     patience_counter += 1
                 if verbose:
-                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_dataset):.12f}, Val Loss: {val_loss:.12f}")
+                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_loader.dataset):.12f}, Val Loss: {val_loss:.12f}")
                 if patience_counter >= early_stopping_patience:
                     if verbose:
                         print(f"Early stopping at epoch {epoch+1}. Best Val Loss: {best_val_loss:.12f}")
@@ -169,9 +168,9 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
                     break
             else:
                 if verbose and (epoch % 5 == 0 or epoch == epochs-1):
-                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_dataset):.12f}")
+                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_loader.dataset):.12f}")
         # Restore best weights if early stopping was used
-        if val_dataset is not None and best_state is not None:
+        if val_loader is not None and best_state is not None:
             self.load_state_dict(best_state)
         return self
 
@@ -204,14 +203,13 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
             mse = torch.tensor(0.0, device=reg_pred.device)
         return bce + mse
 
-    def evaluate(self, val_dataset):
+    def evaluate(self, val_loader):
         device = next(self.parameters()).device
         self.eval()
         total_loss = 0
         n_samples = 0
         with torch.no_grad():
-            loader = torch.utils.data.DataLoader(val_dataset, batch_size=512, shuffle=False)
-            for X, y_cls, y_reg in loader:
+            for X, y_cls, y_reg in val_loader:
                 X = self.scale_X(X).to(device)
                 y_cls = y_cls.to(device).unsqueeze(1)
                 y_reg = self.scale_y_reg(y_reg).to(device).unsqueeze(1)

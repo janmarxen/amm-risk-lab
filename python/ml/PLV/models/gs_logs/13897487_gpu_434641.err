@@ -1,0 +1,119 @@
+The activation script must be sourced, otherwise the virtual environment will not work.
+Setting vars
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) Stages/2025
+
+The following have been reloaded with a version change:
+  1) sympy/1.13.3 => sympy/1.13.1
+
+Number of pools in HDF5: 0
+Grid search over 128 combinations.
+
+[GridSearch] Combination 5/128: n_lags=7, batch_size=64, d_model=32, num_heads=2, num_layers=2, dense_units=32, dropout=0.1, lr=0.001, epochs=100
+Number of training samples: 18459
+Number of validation samples: 687
+[fit] Using device: cuda (type: cuda)
+Number of pools in HDF5: 0
+Grid search over 128 combinations.
+
+[GridSearch] Combination 7/128: n_lags=7, batch_size=64, d_model=32, num_heads=2, num_layers=2, dense_units=32, dropout=0.2, lr=0.001, epochs=100
+Number of training samples: 18459
+Number of validation samples: 687
+[fit] Using device: cuda (type: cuda)
+Number of pools in HDF5: 0
+Grid search over 128 combinations.
+
+[GridSearch] Combination 6/128: n_lags=7, batch_size=64, d_model=32, num_heads=2, num_layers=2, dense_units=32, dropout=0.1, lr=0.0005, epochs=100
+Number of training samples: 18459
+Number of validation samples: 687
+[fit] Using device: cuda (type: cuda)
+Number of pools in HDF5: 0
+Grid search over 128 combinations.
+
+[GridSearch] Combination 8/128: n_lags=7, batch_size=64, d_model=32, num_heads=2, num_layers=2, dense_units=32, dropout=0.2, lr=0.0005, epochs=100
+Number of training samples: 18459
+Number of validation samples: 687
+[fit] Using device: cuda (type: cuda)
+Number of pools in HDF5: 0
+Grid search over 128 combinations.
+
+[GridSearch] Combination 1/128: n_lags=7, batch_size=64, d_model=32, num_heads=2, num_layers=2, dense_units=16, dropout=0.1, lr=0.001, epochs=100
+Number of training samples: 18459
+Number of validation samples: 687
+[fit] Using device: cuda (type: cuda)
+Number of pools in HDF5: 0
+Grid search over 128 combinations.
+
+[GridSearch] Combination 4/128: n_lags=7, batch_size=64, d_model=32, num_heads=2, num_layers=2, dense_units=16, dropout=0.2, lr=0.0005, epochs=100
+Number of training samples: 18459
+Number of validation samples: 687
+[fit] Using device: cuda (type: cuda)
+Number of pools in HDF5: 0
+Grid search over 128 combinations.
+
+[GridSearch] Combination 3/128: n_lags=7, batch_size=64, d_model=32, num_heads=2, num_layers=2, dense_units=16, dropout=0.2, lr=0.001, epochs=100
+Number of training samples: 18459
+Number of validation samples: 687
+[fit] Using device: cuda (type: cuda)
+Number of pools in HDF5: 0
+Grid search over 128 combinations.
+
+[GridSearch] Combination 2/128: n_lags=7, batch_size=64, d_model=32, num_heads=2, num_layers=2, dense_units=16, dropout=0.1, lr=0.0005, epochs=100
+Number of training samples: 18459
+Number of validation samples: 687
+[fit] Using device: cuda (type: cuda)
+Epoch 1/100, Train Loss: 60.627324229595, Val Loss: 86.434526207492
+Epoch 1/100, Train Loss: 60.336813694568, Val Loss: 86.439240784624
+Epoch 1/100, Train Loss: 61.132178809326, Val Loss: 88.429205437762
+Epoch 1/100, Train Loss: 61.331792470906, Val Loss: 88.539742299042
+Epoch 1/100, Train Loss: 60.316953860239, Val Loss: 91.068053624515
+Epoch 1/100, Train Loss: 59.615872058303, Val Loss: 91.457602535620
+Epoch 1/100, Train Loss: 60.607280167232, Val Loss: 90.474964622153
+Epoch 1/100, Train Loss: 59.838401139328, Val Loss: 91.143530849807
+Epoch 2/100, Train Loss: 58.399061980346, Val Loss: 82.986358320522
+Epoch 2/100, Train Loss: 57.996590324016, Val Loss: 82.912500123270
+Epoch 2/100, Train Loss: 58.675654337281, Val Loss: 82.542538461033
+Epoch 2/100, Train Loss: 58.219639101591, Val Loss: 82.909448743040
+Epoch 2/100, Train Loss: 58.229774663983, Val Loss: 84.901908202636
+Epoch 2/100, Train Loss: 58.585999031135, Val Loss: 85.648017228083
+Epoch 2/100, Train Loss: 57.851755749889, Val Loss: 84.006665886403
+Epoch 2/100, Train Loss: 58.130331756015, Val Loss: 83.238225889692
+Epoch 3/100, Train Loss: 58.273354357414, Val Loss: 81.665548182991
+Epoch 3/100, Train Loss: 57.986395829418, Val Loss: 82.873943414924
+Epoch 3/100, Train Loss: 58.604476917965, Val Loss: 82.180225955347
+Epoch 3/100, Train Loss: 58.371702692983, Val Loss: 82.747663628413
+Epoch 3/100, Train Loss: 57.923492942499, Val Loss: 80.877896948846
+Epoch 3/100, Train Loss: 58.369726478514, Val Loss: 81.633584523652
+Epoch 3/100, Train Loss: 57.756468579198, Val Loss: 80.728407819545
+Epoch 3/100, Train Loss: 57.898233560113, Val Loss: 81.165802143547
+Epoch 4/100, Train Loss: 57.484030688182, Val Loss: 82.316766958223
+Epoch 4/100, Train Loss: 57.273252701590, Val Loss: 85.342383905269
+Epoch 4/100, Train Loss: 57.806685987225, Val Loss: 82.073125070186
+Epoch 4/100, Train Loss: 57.534930801164, Val Loss: 82.781048670606
+Epoch 4/100, Train Loss: 57.314922927732, Val Loss: 80.785600093081
+Epoch 4/100, Train Loss: 57.707680899619, Val Loss: 81.219104650239
+Epoch 4/100, Train Loss: 57.270052487391, Val Loss: 81.029659909799
+Epoch 4/100, Train Loss: 57.557475281340, Val Loss: 80.525613626538
+Epoch 5/100, Train Loss: 56.861468219184, Val Loss: 81.277985785205
+Epoch 5/100, Train Loss: 57.253994431732, Val Loss: 80.824711101371
+Epoch 5/100, Train Loss: 56.582385097838, Val Loss: 82.343124717257
+Epoch 5/100, Train Loss: 57.126223788113, Val Loss: 82.055131962206
+Epoch 5/100, Train Loss: 56.751097915296, Val Loss: 79.739162267382
+Epoch 5/100, Train Loss: 57.386944450132, Val Loss: 80.483127005409
+Epoch 5/100, Train Loss: 56.738611039558, Val Loss: 81.327002884866
+Epoch 5/100, Train Loss: 57.130700083129, Val Loss: 81.190440170977
+Epoch 6/100, Train Loss: 56.348419270463, Val Loss: 79.663427177996
+Epoch 6/100, Train Loss: 56.798419359078, Val Loss: 79.385577744619
+Epoch 6/100, Train Loss: 56.305074991736, Val Loss: 80.646541989700
+Epoch 6/100, Train Loss: 57.034035929686, Val Loss: 80.925006827586
+Epoch 6/100, Train Loss: 56.581382572499, Val Loss: 79.982669566570
+Epoch 6/100, Train Loss: 57.111497670407, Val Loss: 80.013728340293
+Epoch 6/100, Train Loss: 56.543630759412, Val Loss: 82.735728590075
+Epoch 6/100, Train Loss: 56.910456948746, Val Loss: 80.569347406579
+Epoch 7/100, Train Loss: 55.937257360538, Val Loss: 82.277101791582
+Epoch 7/100, Train Loss: 56.766067576800, Val Loss: 80.930770962866
+Epoch 7/100, Train Loss: 55.959498976194, Val Loss: 82.434501187076
+Epoch 7/100, Train Loss: 56.647424740964, Val Loss: 82.483334986924
+Epoch 7/100, Train Loss: 56.137568913945, Val Loss: 80.508467606235

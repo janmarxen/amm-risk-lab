@@ -28,7 +28,9 @@ python3 -m python.ml.PLV.scripts.run_data_download
 
 # Transformer DDP scripts
 sbatch ./python/ml/PLV/scripts/transformer_runs/batch_run_ddp_liquidity_training.sbatch
+sbatch ./python/ml/PLV/scripts/transformer_runs/batch_run_gs_liquidity.sbatch
 
+# Check job status
 
-
-$HOME/course/sc_venv_template/setup.sh 
+# Size of data
+stat /p/scratch/training2529/uniswap_pools_data.h5

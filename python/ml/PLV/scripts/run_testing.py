@@ -1,5 +1,6 @@
 import os
 import torch
+from torch.utils.data import DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
 from python.ml.PLV.data_io import LPsDataset, fetch_and_save_pools
@@ -124,6 +125,7 @@ def main():
         split_dates=split_dates,
         verbose=1
     )
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
     if len(test_dataset) == 0:
         print("No test data available.")
         return
@@ -174,16 +176,17 @@ def main():
         split_dates={'train_start': split_dates['train_start'], 'train_end': split_dates['val_end'], 'val_start': split_dates['val_start'], 'val_end': split_dates['val_end']},
         verbose=1
     )
+    finetune_loader = DataLoader(finetune_dataset, batch_size=args.finetune_batch_size, shuffle=True)
+    finetune_val_loader = DataLoader(finetune_val_dataset, batch_size=args.finetune_batch_size, shuffle=False)
     if len(finetune_dataset) == 0:
         print("No data available for finetuning on this pool.")
     else:
         model.fit(
-            finetune_dataset,
+            finetune_loader,
             epochs=args.finetune_epochs,
-            batch_size=args.finetune_batch_size,
             lr=args.finetune_lr,
             verbose=1,
-            val_dataset=finetune_val_dataset,
+            val_loader=finetune_val_loader,
             early_stopping_patience=10
         )
         print("Finetuning complete.")

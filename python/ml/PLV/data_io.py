@@ -7,11 +7,12 @@ import pandas as pd
 import time
 from typing import List, Dict
 import numpy as np
+import h5py
 
 import torch
 from torch.utils.data import Dataset
 
-from python.utils.subgraph_utils import fetch_pool_hourly_data
+from python.utils.subgraph_utils import fetch_pool_hourly_data, fetch_pools_hourly_data_multi
 
 def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -131,17 +132,18 @@ def fetch_and_save_pools(
     Each pool is saved under key /pool_<address>. Metadata is saved under /meta.
     mode: 'w' (overwrite pool), 'a' (append/update pool), 'x' (skip if pool exists)
     """
-    import h5py
     fetched = []
     total = len(pool_addresses)
     # Open HDF5 file in append mode
     with h5py.File(hdf5_path, 'a') as h5f:
+    # Fetch all pools in one query
+        pool_data_dict = fetch_pools_hourly_data_multi(api_key, subgraph_id, pool_addresses, start_date, end_date)
         for idx, addr in enumerate(pool_addresses, 1):
             pool_key = f'pool_{addr.lower()}'
             if mode == 'x' and pool_key in h5f:
                 print(f"[{idx}/{total}] Skipping {addr}: already exists in {hdf5_path}")
                 continue
-            df = fetch_pool_hourly_data(api_key, subgraph_id, addr, start_date, end_date)
+            df = pool_data_dict.get(addr, pd.DataFrame())
             n = len(df)
             if df is not None and n >= min_rows:
                 print(f"[{idx}/{total}] Fetching {addr} with {n} rows")
@@ -168,10 +170,10 @@ def fetch_and_save_pools(
                 fetched.append(addr.lower())
             else:
                 print(f"[{idx}/{total}] Skipping {addr}: insufficient data")
-        # Save metadata
-        meta_grp = h5f.require_group('meta')
-        meta_grp.attrs['pool_addresses'] = ','.join(fetched)
-        meta_grp.attrs['fetch_time'] = time.time()
+            # Save metadata
+            meta_grp = h5f.require_group('meta')
+            meta_grp.attrs['pool_addresses'] = ','.join(fetched)
+            meta_grp.attrs['fetch_time'] = time.time()
     print(f"Saved {len(fetched)} pools to {hdf5_path}")
 
 def load_pool_data(hdf5_path: str, pool_address: str) -> pd.DataFrame:

@@ -8,6 +8,8 @@ import argparse
 from random import shuffle as random_shuffle
 import sys
 
+from python.utils.subgraph_utils import fetch_all_pool_addresses
+from python.ml.PLV.data_io import fetch_and_save_pools
 
 def main():
     parser = argparse.ArgumentParser()
@@ -37,7 +39,6 @@ def main():
 
     # ---- Fetch pool addresses ----
     print("Fetching all pool addresses from subgraph...")
-    from python.utils.subgraph_utils import fetch_all_pool_addresses
     pool_addresses = fetch_all_pool_addresses(api_key, subgraph_id, pool_tier=pool_tier)
     print(f"Found {len(pool_addresses)} pools.")
     random_shuffle(pool_addresses)
@@ -49,7 +50,6 @@ def main():
 
     # ---- Download and save pool data ----
     print(f"Downloading pool data and saving to {hdf5_path} ...")
-    from python.ml.PLV.data_io import fetch_and_save_pools
     fetch_and_save_pools(
         api_key=api_key,
         subgraph_id=subgraph_id,

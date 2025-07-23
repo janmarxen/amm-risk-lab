@@ -1,5 +1,6 @@
 import os
 import functools
+import sys
 
 import torch
 from torch.distributed import checkpoint as dcp
@@ -78,37 +79,6 @@ def save_full_model(model, optimizer=None, *args, **kwargs):
         cpu_state['optimizer'] = optim_state_dict
 
     save0(cpu_state, *args, **kwargs)
-
-
-def save_sharded_model(model, optimizer=None, save_dir='checkpoints'):
-    """Obtain sharded model parameters from the GPU, then save the model
-    as a distributed checkpoint to the given directory. Saving a
-    distributed checkpoint means that the checkpoint will be split into
-    individual files, one for each process.
-    """
-    state_dict_options = dist_state_dict.StateDictOptions(
-        full_state_dict=False,
-        cpu_offload=False,
-    )
-    model_state_dict = dist_state_dict.get_model_state_dict(
-        model,
-        options=state_dict_options,
-    )
-    cp_state_dict = {'model': model_state_dict}
-  
-    if optimizer is not None:
-        optim_state_dict = dist_state_dict.get_optimizer_state_dict(
-            model,
-            optimizer,
-            options=state_dict_options,
-        )
-        cp_state_dict['optimizer'] = optim_state_dict
-
-    
-    dcp.save(
-        cp_state_dict,
-        storage_writer=dcp.FileSystemWriter(save_dir, overwrite=True),
-    )
             
 
 def load_full_model(model, optimizer=None, *args, **kwargs):
@@ -126,34 +96,21 @@ def load_full_model(model, optimizer=None, *args, **kwargs):
     return model, optimizer
 
 
-def load_sharded_model(model, optimizer=None, load_dir='checkpoints'):
-    """Set the given model's state dictionary in-place from the given
-    distributed checkpoint directory.
+def atomic_print(*args, device=None, **kwargs):
     """
-    state_dict_options = dist_state_dict.StateDictOptions(
-        cpu_offload=False,
-    )
-    model_state_dict = dist_state_dict.get_model_state_dict(
-        model,
-        options=state_dict_options,
-    )
-    cp_state_dict = {'model': model_state_dict}
+    Print from only one process at a time, in rank order. Optionally include device info.
+    """
+    if not torch.distributed.is_initialized():
+        print(*args, **kwargs)
+        return
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
+    for r in range(world_size):
+        torch.distributed.barrier()
+        if r == rank:
+            prefix = f"[rank {rank} | device {device}] " if device is not None else f"[rank {rank}] "
+            print(prefix, *args, **kwargs)
+            sys.stdout.flush()
+    torch.distributed.barrier()
 
-    dcp.load(
-        cp_state_dict,
-        storage_reader=dcp.FileSystemReader(load_dir),
-    )
 
-    dist_state_dict.set_model_state_dict(model, cp_state_dict['model'])
-
-    if optimizer is not None:
-        optim_state_dict = dist_state_dict.get_optimizer_state_dict(
-            model,
-            optimizer,
-            options=state_dict_options,
-        )
-        cp_state_dict['optimizer'] = optim_state_dict
-        
-        dist_state_dict.set_optimizer_state_dict(
-            model, optimizer, cp_state_dict['optimizer']
-        )
