@@ -1,14 +1,8 @@
 <apiSubgraphs> <idSubgraphs> <poolAddress>
-
 apiSubgraphs: d1762c97d76a973e078c5536742bd237 
 idSubgraphs: 5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV 
 
-python3 python/run_data_download.py
-
-python3 python/ml/PLV/run_training.py
-
-cd /home/janmarxen/personal_projects/liquidity_pools_analytics
-# 
+##### SEQUENTIAL ##### 
 python3 -m python.ml.PLV.scripts.run_data_download
 
 # Data download script
@@ -26,11 +20,27 @@ python3 -m python.ml.PLV.scripts.run_data_download
 ./python/ml/PLV/scripts/transformer_runs/batch_run_gs_liquidity.sh
 ./python/ml/PLV/scripts/transformer_runs/batch_run_gs_volume.sh
 
-# Transformer DDP scripts
+##### DISTRIBUTED #####
+
+# Data download script
+./python/ml/PLV/scripts/batch_run_data_download.sh
+
+### Transformer DDP scripts ###
+# Liquidity training
 sbatch ./python/ml/PLV/scripts/transformer_runs/batch_run_ddp_liquidity_training.sbatch
+
+# Liquidity gridsearch
 sbatch ./python/ml/PLV/scripts/transformer_runs/batch_run_gs_liquidity.sbatch
 
+# Check best model
+python3 ./python/ml/PLV/scripts/collect_best_gs_result.py
+
+# Delete grid search gs_logs and gs_results
+rm -rf /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_logs
+rm -rf /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_results
+
 # Check job status
+squeue -u $USER
 
 # Size of data
 stat /p/scratch/training2529/uniswap_pools_data.h5

@@ -5,7 +5,12 @@ import torch.distributed as dist
 from sklearn.preprocessing import StandardScaler
 
 class ZeroInflatedTSModule(nn.Module, abc.ABC):
-
+    """
+    Abstract base class for zero-inflated time series models.
+    Provides common scaling, training, evaluation, and prediction utilities for time series models
+    with both classification and regression heads. Intended to be subclassed by specific architectures
+    such as LSTM and Transformer.
+    """
     def fit_distributed(self, train_loader, epochs=20, lr=0.001, verbose=1, val_loader=None, early_stopping_patience=10, device=None):
         """
         Distributed training loop using DataLoader and DDP. Assumes model is already wrapped in DDP and on correct device.
@@ -17,6 +22,8 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
             val_loader: Optional validation DataLoader
             early_stopping_patience: Number of epochs to wait for improvement
             device: torch.device
+        Returns:
+            self: Trained model
         """
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         best_val_loss = float('inf')
@@ -77,6 +84,11 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
     def evaluate_distributed(self, val_loader, device=None):
         """
         Distributed evaluation loop using DataLoader and DDP. Returns global average loss.
+        Args:
+            val_loader: Validation DataLoader
+            device: torch.device
+        Returns:
+            float: Global average loss
         """
         self.eval()
         total_loss = 0
@@ -96,14 +108,11 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         dist.all_reduce(n_samples_tensor, op=dist.ReduceOp.SUM)
         avg_loss = (total_loss_tensor / n_samples_tensor).item() if n_samples_tensor.item() > 0 else float('inf')
         return avg_loss
-    """
-    Abstract base class for zero-inflated time series models.
-    Provides common scaling, training, evaluation, and prediction utilities for time series models
-    with both classification and regression heads. Intended to be subclassed by specific architectures
-    such as LSTM and Transformer.
-    """
 
     def __init__(self):
+        """
+        Initialize scalers for features and regression targets.
+        """
         super().__init__()
         self.feature_scaler = StandardScaler()
         self.target_reg_scaler = StandardScaler()
@@ -118,6 +127,8 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
             verbose: Print progress if True
             val_loader: Optional validation DataLoader for early stopping
             early_stopping_patience: Number of epochs to wait for improvement
+        Returns:
+            self: Trained model
         """
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.to(device)
@@ -175,6 +186,13 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         return self
 
     def scale_X(self, X):
+        """
+        Scale input features using the fitted feature scaler.
+        Args:
+            X: Input tensor or ndarray of shape (n_samples, n_lags, n_features)
+        Returns:
+            torch.Tensor: Scaled input tensor
+        """
         if isinstance(X, torch.Tensor):
             X = X.numpy()
         n_samples, n_lags, n_features = X.shape
@@ -183,18 +201,43 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         return torch.tensor(X_scaled, dtype=torch.float32)
 
     def scale_y_reg(self, y_reg):
+        """
+        Scale regression targets using the fitted target scaler.
+        Args:
+            y_reg: Input tensor or ndarray of shape (n_samples,)
+        Returns:
+            torch.Tensor: Scaled regression targets
+        """
         if isinstance(y_reg, torch.Tensor):
             y_reg = y_reg.numpy()
         y_reg_scaled = self.target_reg_scaler.transform(y_reg.reshape(-1, 1)).flatten()
         return torch.tensor(y_reg_scaled, dtype=torch.float32)
 
     def inverse_scale_y_reg(self, y_reg_scaled):
+        """
+        Inverse transform regression targets from scaled to original values.
+        Args:
+            y_reg_scaled: Scaled regression targets (tensor or ndarray)
+        Returns:
+            ndarray: Original regression targets
+        """
         if isinstance(y_reg_scaled, torch.Tensor):
             y_reg_scaled = y_reg_scaled.cpu().numpy()
         return self.target_reg_scaler.inverse_transform(y_reg_scaled.reshape(-1, 1)).flatten()
 
     @staticmethod
     def custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg):
+        """
+        Custom loss for zero-inflated time series models.
+        Combines binary cross-entropy for zero-class and masked MSE for regression.
+        Args:
+            cls_pred: Classification predictions
+            reg_pred: Regression predictions
+            y_cls: True zero-class labels
+            y_reg: True regression targets
+        Returns:
+            torch.Tensor: Combined loss
+        """
         bce = nn.BCELoss()(cls_pred, y_cls)
         mask = (y_cls == 0).float()
         if mask.sum() > 0:
@@ -204,6 +247,13 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         return bce + mse
 
     def evaluate(self, val_loader):
+        """
+        Evaluate the model on a validation DataLoader and return average loss.
+        Args:
+            val_loader: Validation DataLoader
+        Returns:
+            float: Average loss
+        """
         device = next(self.parameters()).device
         self.eval()
         total_loss = 0
@@ -221,6 +271,13 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         return avg_loss
 
     def predict(self, X):
+        """
+        Predict regression and classification outputs for input X.
+        Args:
+            X: Input tensor or ndarray of shape (n_samples, n_lags, n_features)
+        Returns:
+            tuple: (regression predictions, classification predictions)
+        """
         device = next(self.parameters()).device
         self.eval()
         with torch.no_grad():
@@ -240,6 +297,14 @@ class ZeroInflatedTransformer(ZeroInflatedTSModule):
     Transformer-based zero-inflated time series model.
     Uses a transformer encoder to process sequential input data, with shared dense layers and separate
     heads for classification (zero/non-zero) and regression (value prediction). Supports feature and target scaling.
+    Args:
+        input_size (int): Number of input features.
+        n_lags (int): Number of lag steps.
+        d_model (int): Transformer model dimension.
+        num_heads (int): Number of attention heads.
+        num_layers (int): Number of transformer layers.
+        dense_units (int): Number of units in shared dense layer.
+        dropout (float): Dropout rate.
     """
     def __init__(self, input_size, n_lags=1, d_model=32, num_heads=2, num_layers=2, dense_units=16, dropout=0.1):
         super().__init__()
@@ -274,6 +339,11 @@ class ZeroInflatedLSTM(ZeroInflatedTSModule):
     LSTM-based zero-inflated time series model.
     Uses an LSTM to process sequential input data, with shared dense layers and separate heads for
     classification (zero/non-zero) and regression (value prediction). Supports feature and target scaling.
+    Args:
+        input_size (int): Number of input features.
+        n_lags (int): Number of lag steps.
+        lstm_units (int): Number of LSTM units.
+        dense_units (int): Number of units in shared dense layer.
     """
     def __init__(self, input_size, n_lags=1, lstm_units=32, dense_units=16):
         super().__init__()

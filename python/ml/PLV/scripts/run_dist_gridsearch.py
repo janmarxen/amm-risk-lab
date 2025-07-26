@@ -10,6 +10,7 @@ import sys
 from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
 from python.ml.PLV.model import ZeroInflatedLSTM, ZeroInflatedTransformer
 import itertools
+import json
 
 def main():
 
@@ -72,6 +73,7 @@ def main():
     # Assign grid points to processes by GPU id
     local_rank = int(os.environ.get('SLURM_PROCID', 0))
     world_size = int(os.environ.get('SLURM_NTASKS', 1))
+    print(f"[run_gridsearch.py] Local rank: {local_rank}, World size: {world_size}")
     for i, params in enumerate(param_grid):
         if i % world_size != local_rank:
             continue
@@ -133,7 +135,7 @@ def main():
             target=target,
             n_lags=n_lags,
             split='train',
-            split_dates={'train_start': split_dates['train_start'], 'train_end': split_dates['val_end']}
+            split_dates=split_dates
         )
         finetune_val_dataset = LPsDataset(
             hdf5_path=hdf5_path,
@@ -142,7 +144,7 @@ def main():
             target=target,
             n_lags=n_lags,
             split='val',
-            split_dates={'val_start': split_dates['val_start'], 'val_end': split_dates['val_end']}
+            split_dates=split_dates
         )
         if len(finetune_dataset) == 0 or len(finetune_val_dataset) == 0:
             print("Skipping finetuning for this grid point: no data for main pool.")
@@ -160,14 +162,25 @@ def main():
             early_stopping_patience=10
         )
         print("Finetuning complete.")
-        val_loss = model.evaluate(finetune_val_loader)
-        print(f"Custom loss on main pool validation: {val_loss:.8f}")
+        finetune_test_dataset = LPsDataset(
+            hdf5_path=hdf5_path,
+            pool_addresses=[args.main_pool_address],
+            features=features,
+            target=target,
+            n_lags=n_lags,
+            split='test',
+            split_dates=split_dates
+        )
+        finetune_test_loader = DataLoader(
+            finetune_test_dataset, batch_size=batch_size, shuffle=False, pin_memory=True, drop_last=False)
+        test_loss = model.evaluate(finetune_test_loader)
+        print(f"Custom loss on main pool testing: {test_loss:.8f}")
         result = {
+            'model_type': args.model_type,
             'params': param_dict,
-            'val_loss': val_loss
+            'test_loss': test_loss
         }
         # Save result to file
-        import json
         out_path = os.path.join(model_dir, f"{args.model_name}_gpu{local_rank}_gridsearch_result_{i}.json")
         with open(out_path, 'w') as f:
             json.dump(result, f, indent=2)

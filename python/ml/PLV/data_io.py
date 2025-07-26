@@ -12,11 +12,15 @@ import h5py
 import torch
 from torch.utils.data import Dataset
 
-from python.utils.subgraph_utils import fetch_pool_hourly_data, fetch_pools_hourly_data_multi
+from python.utils.subgraph_utils import fetch_pool_hourly_data, fetch_pools_hourly_data_batched, fetch_pools_hourly_data_batched_parallel
 
 def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add engineered features to a pool DataFrame, including returns, rolling stats, and temporal features.
+    Args:
+        df (pd.DataFrame): Raw pool data.
+    Returns:
+        pd.DataFrame: DataFrame with added features.
     """
     df = df.copy()
     if 'datetime' not in df.columns:
@@ -88,6 +92,12 @@ def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
 def dropna(df: pd.DataFrame, features: List[str], target_col: str) -> pd.DataFrame:
     """
     Drop rows with NaNs in any of the selected features or target column.
+    Args:
+        df (pd.DataFrame): Input DataFrame.
+        features (List[str]): List of feature columns.
+        target_col (str): Target column name.
+    Returns:
+        pd.DataFrame: DataFrame with rows containing NaNs dropped.
     """
     mask = df[features + [target_col]].notnull().all(axis=1)
     return df.loc[mask].reset_index(drop=True)
@@ -99,6 +109,13 @@ def get_X_y(df: pd.DataFrame, features: List[str], target_col: str, n_lags: int)
     - y_cls: zero-class labels
     - y_reg: regression targets
     For the target, only lags up to i-1 are included in X (not the present value).
+    Args:
+        df (pd.DataFrame): Input DataFrame.
+        features (List[str]): List of feature columns.
+        target_col (str): Target column name.
+        n_lags (int): Number of lag steps.
+    Returns:
+        tuple: (X, y_cls, y_reg) lists for supervised learning.
     """
     X, y_cls, y_reg = [], [], []
     for i in range(n_lags, len(df)):
@@ -125,19 +142,41 @@ def fetch_and_save_pools(
     end_date: str,
     hdf5_path: str,
     min_rows: int = 100,
-    mode: str = 'w'  # 'w' = overwrite pool, 'a' = append/update pool, 'x' = skip if pool exists
+    mode: str = 'w',  # 'w' = overwrite pool, 'a' = append/update pool, 'x' = skip if exists
+    fetch_mode: str = 'parallel',  # 'sequential', 'batched', or 'parallel'
+    max_workers: int = 16  # Only used for parallel mode
 ):
     """
     Fetch hourly data for each pool, apply feature engineering, and save to HDF5.
     Each pool is saved under key /pool_<address>. Metadata is saved under /meta.
-    mode: 'w' (overwrite pool), 'a' (append/update pool), 'x' (skip if pool exists)
+    Args:
+        api_key (str): The Graph API key.
+        subgraph_id (str): Subgraph ID.
+        pool_addresses (List[str]): List of pool addresses.
+        start_date (str): Start date (YYYY-MM-DD).
+        end_date (str): End date (YYYY-MM-DD).
+        hdf5_path (str): Path to HDF5 file.
+        min_rows (int): Minimum number of rows required to save pool.
+        mode (str): 'w' (overwrite), 'a' (append/update), 'x' (skip if exists).
+        fetch_mode (str): 'sequential', 'batched', or 'parallel' (default: 'parallel').
+        max_workers (int): Number of threads for parallel mode.
+    Returns:
+        None
     """
     fetched = []
     total = len(pool_addresses)
     # Open HDF5 file in append mode
     with h5py.File(hdf5_path, 'a') as h5f:
-    # Fetch all pools in one query
-        pool_data_dict = fetch_pools_hourly_data_multi(api_key, subgraph_id, pool_addresses, start_date, end_date)
+        # Fetch all pools according to fetch_mode
+        if fetch_mode == 'sequential':
+            pool_data_dict = {}
+            for addr in pool_addresses:
+                df = fetch_pool_hourly_data(api_key, subgraph_id, addr, start_date, end_date)
+                pool_data_dict[addr] = df
+        elif fetch_mode == 'batched':
+            pool_data_dict = fetch_pools_hourly_data_batched(api_key, subgraph_id, pool_addresses, start_date, end_date)
+        else:  # 'parallel' (default)
+            pool_data_dict = fetch_pools_hourly_data_batched_parallel(api_key, subgraph_id, pool_addresses, start_date, end_date, max_workers=max_workers)
         for idx, addr in enumerate(pool_addresses, 1):
             pool_key = f'pool_{addr.lower()}'
             if mode == 'x' and pool_key in h5f:
@@ -179,6 +218,14 @@ def fetch_and_save_pools(
 def load_pool_data(hdf5_path: str, pool_address: str) -> pd.DataFrame:
     """
     Load a single pool's data from HDF5 using h5py.
+    Args:
+        hdf5_path (str): Path to HDF5 file.
+        pool_address (str): Pool address.
+    Returns:
+        pd.DataFrame: DataFrame for the pool.
+    Raises:
+        KeyError: If pool not found.
+        ValueError: If no data found for pool.
     """
     import h5py
     pool_key = f'pool_{pool_address.lower()}'
@@ -209,6 +256,10 @@ def load_pool_data(hdf5_path: str, pool_address: str) -> pd.DataFrame:
 def load_all_pools_in_memory(hdf5_path: str) -> Dict[str, pd.DataFrame]:
     """
     Load all pools' data from HDF5 as a dict of address -> DataFrame, kept in memory, using h5py.
+    Args:
+        hdf5_path (str): Path to HDF5 file.
+    Returns:
+        Dict[str, pd.DataFrame]: Mapping pool address to DataFrame.
     """
     import h5py
     pool_dict = {}
@@ -245,6 +296,17 @@ def make_lps_dataset_from_pool_dict(
 ) -> torch.utils.data.Dataset:
     """
     Construct LPsDataset from a dict of DataFrames, avoiding disk reads.
+    Args:
+        pool_dict (Dict[str, pd.DataFrame]): Mapping pool address to DataFrame.
+        pool_addresses (list): List of pool addresses to include.
+        features (list): List of feature columns.
+        target (str): Target column name.
+        n_lags (int): Number of lag steps.
+        split (str): 'train', 'val', or 'test'.
+        split_dates (dict): Dict with split start/end dates.
+        verbose (int): Print progress if 1.
+    Returns:
+        torch.utils.data.Dataset: In-memory dataset.
     """
     class InMemoryLPsDataset(torch.utils.data.Dataset):
         def __init__(self):
@@ -307,6 +369,10 @@ def make_lps_dataset_from_pool_dict(
 def get_saved_pool_addresses(hdf5_path: str) -> List[str]:
     """
     Return the list of pool addresses saved in the HDF5 file using h5py.
+    Args:
+        hdf5_path (str): Path to HDF5 file.
+    Returns:
+        List[str]: List of pool addresses.
     """
     import h5py
     with h5py.File(hdf5_path, 'r') as h5f:
@@ -326,6 +392,15 @@ class LPsDataset(Dataset):
     Each item is a tuple (X, y_cls, y_reg) for supervised learning.
     Allows flexible split: 'train', 'val', or 'test' using split_dates dict.
     split_dates include 'train_start', 'train_end', 'val_start', 'val_end', 'test_start', 'test_end'.
+    Args:
+        hdf5_path (str): Path to HDF5 file.
+        pool_addresses (list, optional): List of pool addresses to load. If None, loads all saved pool addresses.
+        features (list, optional): List of feature columns to use.
+        target (str, optional): Name of target column.
+        n_lags (int, optional): Number of lag steps for LSTM.
+        split (str, optional): 'train', 'val', or 'test'.
+        split_dates (dict, optional): Dict with keys 'train_start', 'train_end', 'val_start', 'val_end', 'test_start', 'test_end' for splitting.
+        verbose (int, optional): Print progress if 1.
     """
     def __init__(
         self,

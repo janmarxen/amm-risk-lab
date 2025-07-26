@@ -1,3 +1,8 @@
+"""
+distributed_utils.py
+
+Utilities for distributed training and checkpointing in PyTorch, including process group setup, root process detection, atomic printing, and model saving/loading.
+"""
 import os
 import functools
 import sys
@@ -7,6 +12,13 @@ from torch.distributed import checkpoint as dcp
 from torch.distributed.checkpoint import state_dict as dist_state_dict
 
 def setup():
+    """
+    Initialize the distributed process group and set up the CUDA device for this process.
+    Returns:
+        local_rank (int): Local rank of the process on the node.
+        rank (int): Global rank of the process in the world.
+        device (torch.device): CUDA device assigned to this process.
+    """
 
     # Initializes a communication group using 'nccl' as the backend for GPU communication.
     torch.distributed.init_process_group(backend='nccl')
@@ -29,23 +41,46 @@ def setup():
     return local_rank, rank, device
 
 def destroy_process_group():
+    """
+    Destroy the distributed process group if initialized.
+    """
     """Destroy the process group."""
     if torch.distributed.is_initialized():
         torch.distributed.destroy_process_group()
 
 functools.lru_cache(maxsize=None)
 def is_root_process():
+    """
+    Return True if this process is the root process (rank 0), else False.
+    Returns:
+        bool: True if root process, False otherwise.
+    """
+
     """Return whether this process is the root process."""
     return torch.distributed.get_rank() == 0
 
 
 def print0(*args, **kwargs):
+    """
+    Print only on the root process (rank 0).
+    Args:
+        *args: Arguments to print.
+        **kwargs: Keyword arguments to print.
+    """
+
     """Print something only on the root process."""
     if is_root_process():
         print(*args, **kwargs)
 
 
 def save0(*args, **kwargs):
+    """
+    Save a checkpoint only on the root process using torch.save.
+    Args:
+        *args: Arguments for torch.save.
+        **kwargs: Keyword arguments for torch.save.
+    """
+
     """Pass the given arguments to `torch.save`, but only on the root
     process.
     """
@@ -56,6 +91,15 @@ def save0(*args, **kwargs):
 
 
 def save_full_model(model, optimizer=None, *args, **kwargs):
+    """
+    Gather all model parameters to rank 0 on CPU and save the model (and optimizer) state dict using torch.save, only on the root process.
+    Args:
+        model: PyTorch model to save.
+        optimizer: (Optional) PyTorch optimizer to save.
+        *args: Arguments for torch.save.
+        **kwargs: Keyword arguments for torch.save.
+    """
+
     """Stream all model parameters to rank 0 on the CPU, then pass all
     other given arguments to `torch.save` to save the model, but only on
     the root process.
@@ -82,6 +126,17 @@ def save_full_model(model, optimizer=None, *args, **kwargs):
             
 
 def load_full_model(model, optimizer=None, *args, **kwargs):
+    """
+    Load model and optimizer state dict from a checkpoint file using torch.load.
+    Args:
+        model: PyTorch model to load into.
+        optimizer: (Optional) PyTorch optimizer to load into.
+        *args: Arguments for torch.load.
+        **kwargs: Keyword arguments for torch.load.
+    Returns:
+        tuple: (model, optimizer) with loaded state dicts.
+    """
+
     """Pass all other given arguments to `torch.load` and load the
     resulting state dict into the given model.
     """
@@ -97,6 +152,14 @@ def load_full_model(model, optimizer=None, *args, **kwargs):
 
 
 def atomic_print(*args, device=None, **kwargs):
+    """
+    Print from only one process at a time, in rank order. Optionally include device info.
+    Args:
+        *args: Arguments to print.
+        device: (Optional) Device info to include in prefix.
+        **kwargs: Keyword arguments to print.
+    """
+
     """
     Print from only one process at a time, in rank order. Optionally include device info.
     """

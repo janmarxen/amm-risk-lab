@@ -1,4 +1,5 @@
 #!/bin/bash
+#SBATCH --job-name=liquidity_training
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4  
 #SBATCH --ntasks-per-node=1
@@ -42,7 +43,7 @@ DENSE_UNITS=32
 DROPOUT=0.1
 LR=0.001
 EPOCHS=50
-N_POOLS=500
+N_POOLS=10000
 MODEL_NAME="transformer_model_liquidity_0"
 FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,\
 liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,\
