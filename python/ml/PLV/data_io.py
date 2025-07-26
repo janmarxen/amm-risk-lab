@@ -12,6 +12,8 @@ import h5py
 import torch
 from torch.utils.data import Dataset
 
+import concurrent.futures
+
 from python.utils.subgraph_utils import fetch_pool_hourly_data, fetch_pools_hourly_data_batched, fetch_pools_hourly_data_batched_parallel
 
 def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
@@ -411,7 +413,8 @@ class LPsDataset(Dataset):
         n_lags: int = 1,
         split: str = 'train',
         split_dates: dict = None,
-        verbose: int = 1
+        verbose: int = 1,
+        num_workers: int = 16
     ):
         """
         Args:
@@ -428,49 +431,66 @@ class LPsDataset(Dataset):
             pool_addresses = get_saved_pool_addresses(hdf5_path)
         self.X, self.y_cls, self.y_reg = [], [], []
         total = len(pool_addresses)
-        for idx, addr in enumerate(pool_addresses, 1):
-            try:
-                df = load_pool_data(hdf5_path, addr)
-            except (KeyError, FileNotFoundError):
+        def process_chunk(address_chunk):
+            chunk_X, chunk_y_cls, chunk_y_reg = [], [], []
+            for addr in address_chunk:
+                try:
+                    df = load_pool_data(hdf5_path, addr)
+                except (KeyError, FileNotFoundError, Exception):
+                    continue
+                # Flexible split logic with custom start/end for each split
+                if split_dates is not None:
+                    if split == 'train':
+                        start = split_dates.get('train_start', None)
+                        end = split_dates.get('train_end', None)
+                        if start is not None:
+                            df = df[df['datetime'] >= pd.to_datetime(start)]
+                        if end is not None:
+                            df = df[df['datetime'] <= pd.to_datetime(end)]
+                        df = df.copy()
+                    elif split == 'val':
+                        start = split_dates.get('val_start', None)
+                        end = split_dates.get('val_end', None)
+                        if start is not None:
+                            df = df[df['datetime'] >= pd.to_datetime(start)]
+                        if end is not None:
+                            df = df[df['datetime'] <= pd.to_datetime(end)]
+                        df = df.copy()
+                    elif split == 'test':
+                        start = split_dates.get('test_start', None)
+                        end = split_dates.get('test_end', None)
+                        if start is not None:
+                            df = df[df['datetime'] >= pd.to_datetime(start)]
+                        if end is not None:
+                            df = df[df['datetime'] <= pd.to_datetime(end)]
+                        df = df.copy()
+                df['pool'] = addr
+                df = dropna(df, features, target)
+                X, y_cls, y_reg = get_X_y(df, features, target, n_lags)
+                chunk_X.extend(X)
+                chunk_y_cls.extend(y_cls)
+                chunk_y_reg.extend(y_reg)
+            return chunk_X, chunk_y_cls, chunk_y_reg
+
+        # Split pool_addresses into chunks
+        def chunkify(lst, n):
+            return [lst[i::n] for i in range(n)]
+
+        address_chunks = chunkify(pool_addresses, num_workers)
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            future_to_chunk = {executor.submit(process_chunk, chunk): idx for idx, chunk in enumerate(address_chunks)}
+            for i, future in enumerate(concurrent.futures.as_completed(future_to_chunk), 1):
+                X, y_cls, y_reg = future.result()
+                results.append((X, y_cls, y_reg))
                 if verbose:
-                    print(f"{idx}/{total}: Pool {addr} not found in HDF5, skipping.")
-                continue
-            except Exception as e:
-                if verbose:
-                    print(f"{idx}/{total}: Error loading pool {addr}: {e}")
-                continue
-            # Flexible split logic with custom start/end for each split
-            if split_dates is not None:
-                if split == 'train':
-                    start = split_dates.get('train_start', None)
-                    end = split_dates.get('train_end', None)
-                    if start is not None:
-                        df = df[df['datetime'] >= pd.to_datetime(start)]
-                    if end is not None:
-                        df = df[df['datetime'] <= pd.to_datetime(end)]
-                    df = df.copy()
-                elif split == 'val':
-                    start = split_dates.get('val_start', None)
-                    end = split_dates.get('val_end', None)
-                    if start is not None:
-                        df = df[df['datetime'] >= pd.to_datetime(start)]
-                    if end is not None:
-                        df = df[df['datetime'] <= pd.to_datetime(end)]
-                    df = df.copy()
-                elif split == 'test':
-                    start = split_dates.get('test_start', None)
-                    end = split_dates.get('test_end', None)
-                    if start is not None:
-                        df = df[df['datetime'] >= pd.to_datetime(start)]
-                    if end is not None:
-                        df = df[df['datetime'] <= pd.to_datetime(end)]
-                    df = df.copy()
-            df['pool'] = addr
-            df = dropna(df, features, target)
-            X, y_cls, y_reg = get_X_y(df, features, target, n_lags)
+                    print(f"Loaded chunk {i}/{num_workers} ({len(X)} samples)")
+        for idx, (X, y_cls, y_reg) in enumerate(results, 1):
             self.X.extend(X)
             self.y_cls.extend(y_cls)
             self.y_reg.extend(y_reg)
+            # if verbose:
+            #     print(f"{idx}/{total}: Pool processed (threaded)")
         if self.X:
             self.X = torch.tensor(np.array(self.X), dtype=torch.float32)  # Convert list of arrays to single ndarray first
             self.y_cls = torch.tensor(self.y_cls, dtype=torch.float32)

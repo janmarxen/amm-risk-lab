@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=liquidity_training
+#SBATCH --job-name=liquidity_pretraining
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4  
 #SBATCH --ntasks-per-node=1
@@ -44,7 +44,7 @@ DROPOUT=0.1
 LR=0.001
 EPOCHS=50
 N_POOLS=10000
-MODEL_NAME="transformer_model_liquidity_0"
+MODEL_NAME="transformer_pretrained_liquidity"
 FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,\
 liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,\
 price_ma_3h,price_ma_6h,price_ma_24h,\
@@ -59,7 +59,6 @@ VAL_START="2025-05-02"
 VAL_END="2025-06-01"
 TEST_START="2025-06-02"
 TEST_END="2025-07-01"
-MAIN_POOL_ADDRESS="0xcbcdf9626bc03e24f779434178a73a0b4bad62ed"
 
 # Launch a distributed training job across multiple nodes and GPUs
 srun --cpu_bind=none bash -c "torchrun_jsc \
@@ -69,7 +68,7 @@ srun --cpu_bind=none bash -c "torchrun_jsc \
     --rdzv_id $RANDOM \
     --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
     --rdzv_conf=is_host=\$(if ((SLURM_NODEID)); then echo 0; else echo 1; fi) \
-    python/ml/PLV/scripts/run_ddp_training.py \
+    python/ml/PLV/scripts/run_ddp_pretraining.py \
     --n_lags $N_LAGS \
     --batch_size $BATCH_SIZE \
     --d_model $D_MODEL \
@@ -86,7 +85,6 @@ srun --cpu_bind=none bash -c "torchrun_jsc \
     --test_start $TEST_START \
     --test_end $TEST_END \
     --model_name $MODEL_NAME \
-    --main_pool_address $MAIN_POOL_ADDRESS \
     --n_pools $N_POOLS \
     --features "$FEATURES" \
     --target "$TARGET" \

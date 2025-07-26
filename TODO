@@ -1,4 +1,6 @@
 Priority:
+- Paralellize LPDataset by sending data directly to GPU?
+- Make pretraining, finetuning and testing scripts load best parameters from GS.
 - Ameliorate outlier removal mechanism and see correctness of processed data.
 - Make autoregressive testing part of the pipeline.
 - Print out the cross-table after testing.

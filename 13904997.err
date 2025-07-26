@@ -1,0 +1,17 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) Stages/2025
+
+The following have been reloaded with a version change:
+  1) sympy/1.13.3 => sympy/1.13.1
+
+WARNING:__main__:
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+[W726 16:35:23.580983144 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0198i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+[W726 16:35:30.890950888 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0198i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+[W726 16:35:30.891177261 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0198i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+[W726 16:35:30.890986719 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0198i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
+[W726 16:35:30.891818808 socket.cpp:752] [c10d] The client socket cannot be initialized to connect to [jrc0198i.jureca]:7010 (errno: 97 - Address family not supported by protocol).
