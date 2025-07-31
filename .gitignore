@@ -34,3 +34,7 @@ __pycache__/
 *.tmp
 
 python/ml/PLV/data/
+
+*.err
+*.out
+*.png
