@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=00:30:00
+#SBATCH --time=00:45:00
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
 
@@ -35,7 +35,7 @@ set -e
 API_KEY="d1762c97d76a973e078c5536742bd237"
 SUBGRAPH_ID="5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV"
 N_LAGS=7
-BATCH_SIZE=128
+BATCH_SIZE=2048
 D_MODEL=32
 NUM_HEADS=2
 NUM_LAYERS=2

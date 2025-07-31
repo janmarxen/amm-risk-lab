@@ -2,7 +2,6 @@ import abc
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from sklearn.preprocessing import StandardScaler
 
 class ZeroInflatedTSModule(nn.Module, abc.ABC):
     """
@@ -11,11 +10,12 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
     with both classification and regression heads. Intended to be subclassed by specific architectures
     such as LSTM and Transformer.
     """
+
     def fit_distributed(self, train_loader, epochs=20, lr=0.001, verbose=1, val_loader=None, early_stopping_patience=10, device=None):
         """
         Distributed training loop using DataLoader and DDP. Assumes model is already wrapped in DDP and on correct device.
         Args:
-            train_loader: DataLoader for training data
+            train_loader: DataLoader for training data (already scaled)
             epochs: Number of epochs
             lr: Learning rate
             verbose: Print progress if True (should be rank 0 only)
@@ -29,33 +29,30 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         best_val_loss = float('inf')
         best_state = None
         patience_counter = 0
+
         for epoch in range(epochs):
             self.train()
             total_loss = 0
             for X, y_cls, y_reg in train_loader:
-                X_np = X.cpu().numpy()
-                n_samples, n_lags, n_features = X_np.shape
-                X_reshaped = X_np.reshape(-1, n_features)
-                y_reg_np = y_reg.cpu().numpy().reshape(-1, 1)
-                self.feature_scaler.partial_fit(X_reshaped)
-                self.target_reg_scaler.partial_fit(y_reg_np)
-                X_scaled = self.feature_scaler.transform(X_reshaped).reshape(n_samples, n_lags, n_features)
-                y_reg_scaled = self.target_reg_scaler.transform(y_reg_np).flatten()
-                X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=device)
+                X_tensor = X.to(device)
                 y_cls = y_cls.to(device).unsqueeze(1)
-                y_reg_tensor = torch.tensor(y_reg_scaled, dtype=torch.float32, device=device).unsqueeze(1)
+                y_reg_tensor = y_reg.to(device).unsqueeze(1)
+
                 optimizer.zero_grad()
                 cls_pred, reg_pred = self(X_tensor)
                 loss = self.__class__.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg_tensor)
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item() * X.size(0)
+
             # Distributed average loss
             total_loss_tensor = torch.tensor(total_loss, device=device)
             n_samples_tensor = torch.tensor(len(train_loader.dataset), device=device)
             dist.all_reduce(total_loss_tensor, op=dist.ReduceOp.SUM)
             dist.all_reduce(n_samples_tensor, op=dist.ReduceOp.SUM)
             avg_train_loss = (total_loss_tensor / n_samples_tensor).item() if n_samples_tensor.item() > 0 else float('inf')
+
+            # Validation & early stopping
             val_loss = None
             if val_loader is not None:
                 val_loss = self.evaluate_distributed(val_loader, device=device)
@@ -65,21 +62,25 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
                     patience_counter = 0
                 else:
                     patience_counter += 1
-                if verbose:
+
+                if verbose and dist.get_rank() == 0:
                     print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.12f}, Val Loss: {val_loss:.12f}")
+
                 if patience_counter >= early_stopping_patience:
-                    if verbose:
+                    if verbose and dist.get_rank() == 0:
                         print(f"Early stopping at epoch {epoch+1}. Best Val Loss: {best_val_loss:.12f}")
                     if best_state is not None:
                         self.load_state_dict(best_state)
                     break
             else:
-                if verbose and (epoch % 5 == 0 or epoch == epochs-1):
+                if verbose and dist.get_rank() == 0 and (epoch % 5 == 0 or epoch == epochs - 1):
                     print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.12f}")
+
         # Restore best weights if early stopping was used
         if val_loader is not None and best_state is not None:
             self.load_state_dict(best_state)
         return self
+
 
     def evaluate_distributed(self, val_loader, device=None):
         """
@@ -95,9 +96,9 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         n_samples = 0
         with torch.no_grad():
             for X, y_cls, y_reg in val_loader:
-                X = self.scale_X(X).to(device)
+                X = X.to(device)
                 y_cls = y_cls.to(device).unsqueeze(1)
-                y_reg = self.scale_y_reg(y_reg).to(device).unsqueeze(1)
+                y_reg = y_reg.to(device).unsqueeze(1)
                 cls_pred, reg_pred = self(X)
                 loss = self.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg)
                 total_loss += loss.item() * X.size(0)
@@ -109,17 +110,9 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         avg_loss = (total_loss_tensor / n_samples_tensor).item() if n_samples_tensor.item() > 0 else float('inf')
         return avg_loss
 
-    def __init__(self):
-        """
-        Initialize scalers for features and regression targets.
-        """
-        super().__init__()
-        self.feature_scaler = StandardScaler()
-        self.target_reg_scaler = StandardScaler()
-
     def fit(self, train_loader, epochs=20, lr=0.001, verbose=1, val_loader=None, early_stopping_patience=10):
         """
-        Train the model using a PyTorch DataLoader, with incremental scaling.
+        Train the model using a PyTorch DataLoader.
         Args:
             train_loader: PyTorch DataLoader (X, y_cls, y_reg)
             epochs: Number of epochs
@@ -141,19 +134,9 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
             self.train()
             total_loss = 0
             for X, y_cls, y_reg in train_loader:
-                # Incrementally fit scalers on this batch
-                X_np = X.numpy()
-                n_samples, n_lags, n_features = X_np.shape
-                X_reshaped = X_np.reshape(-1, n_features)
-                y_reg_np = y_reg.numpy().reshape(-1, 1)
-                self.feature_scaler.partial_fit(X_reshaped)
-                self.target_reg_scaler.partial_fit(y_reg_np)
-                # Transform batch using current scalers
-                X_scaled = self.feature_scaler.transform(X_reshaped).reshape(n_samples, n_lags, n_features)
-                y_reg_scaled = self.target_reg_scaler.transform(y_reg_np).flatten()
-                X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=device)
+                X_tensor = X.to(device)
                 y_cls = y_cls.to(device).unsqueeze(1)
-                y_reg_tensor = torch.tensor(y_reg_scaled, dtype=torch.float32, device=device).unsqueeze(1)
+                y_reg_tensor = y_reg.to(device).unsqueeze(1)
                 optimizer.zero_grad()
                 cls_pred, reg_pred = self(X_tensor)
                 loss = self.__class__.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg_tensor)
@@ -184,46 +167,6 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         if val_loader is not None and best_state is not None:
             self.load_state_dict(best_state)
         return self
-
-    def scale_X(self, X):
-        """
-        Scale input features using the fitted feature scaler.
-        Args:
-            X: Input tensor or ndarray of shape (n_samples, n_lags, n_features)
-        Returns:
-            torch.Tensor: Scaled input tensor
-        """
-        if isinstance(X, torch.Tensor):
-            X = X.numpy()
-        n_samples, n_lags, n_features = X.shape
-        X_reshaped = X.reshape(-1, n_features)
-        X_scaled = self.feature_scaler.transform(X_reshaped).reshape(n_samples, n_lags, n_features)
-        return torch.tensor(X_scaled, dtype=torch.float32)
-
-    def scale_y_reg(self, y_reg):
-        """
-        Scale regression targets using the fitted target scaler.
-        Args:
-            y_reg: Input tensor or ndarray of shape (n_samples,)
-        Returns:
-            torch.Tensor: Scaled regression targets
-        """
-        if isinstance(y_reg, torch.Tensor):
-            y_reg = y_reg.numpy()
-        y_reg_scaled = self.target_reg_scaler.transform(y_reg.reshape(-1, 1)).flatten()
-        return torch.tensor(y_reg_scaled, dtype=torch.float32)
-
-    def inverse_scale_y_reg(self, y_reg_scaled):
-        """
-        Inverse transform regression targets from scaled to original values.
-        Args:
-            y_reg_scaled: Scaled regression targets (tensor or ndarray)
-        Returns:
-            ndarray: Original regression targets
-        """
-        if isinstance(y_reg_scaled, torch.Tensor):
-            y_reg_scaled = y_reg_scaled.cpu().numpy()
-        return self.target_reg_scaler.inverse_transform(y_reg_scaled.reshape(-1, 1)).flatten()
 
     @staticmethod
     def custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg):

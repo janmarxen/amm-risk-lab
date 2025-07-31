@@ -65,7 +65,6 @@ srun --cpu_bind=none bash -c "torchrun_jsc \
     --rdzv_conf=is_host=\$(if ((SLURM_NODEID)); then echo 0; else echo 1; fi) \
     python/ml/PLV/scripts/run_ddp_finetuning.py \
     --n_lags $N_LAGS \
-    --batch_size $BATCH_SIZE \
     --d_model $D_MODEL \
     --num_heads $NUM_HEADS \
     --num_layers $NUM_LAYERS \

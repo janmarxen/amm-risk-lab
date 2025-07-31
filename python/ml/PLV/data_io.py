@@ -5,7 +5,7 @@ Utility functions and PyTorch Dataset for loading, engineering, and preparing Un
 """
 import pandas as pd
 import time
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import numpy as np
 import h5py
 
@@ -13,6 +13,7 @@ import torch
 from torch.utils.data import Dataset
 
 import concurrent.futures
+from threading import Lock
 
 from python.utils.subgraph_utils import fetch_pool_hourly_data, fetch_pools_hourly_data_batched, fetch_pools_hourly_data_batched_parallel
 
@@ -104,37 +105,57 @@ def dropna(df: pd.DataFrame, features: List[str], target_col: str) -> pd.DataFra
     mask = df[features + [target_col]].notnull().all(axis=1)
     return df.loc[mask].reset_index(drop=True)
 
-def get_X_y(df: pd.DataFrame, features: List[str], target_col: str, n_lags: int):
+def get_X_y(df: pd.DataFrame, features: List[str], target_col: str, n_lags: int) -> Tuple[list, list, list]:
     """
-    Convert a DataFrame to supervised learning arrays for LSTM:
-    - X: lagged feature windows (including present values at i)
-    - y_cls: zero-class labels
-    - y_reg: regression targets
-    For the target, only lags up to i-1 are included in X (not the present value).
-    Args:
-        df (pd.DataFrame): Input DataFrame.
-        features (List[str]): List of feature columns.
-        target_col (str): Target column name.
-        n_lags (int): Number of lag steps.
-    Returns:
-        tuple: (X, y_cls, y_reg) lists for supervised learning.
+    Convert a DataFrame to supervised learning arrays for ZeroInflated LSTM/Transformer:
+    - X: lagged feature windows + target lags
+    - y_cls: classification label (1 if target == 0, else 0)
+    - y_reg: regression target
+
+    Faster by leveraging NumPy vectorization.
     """
-    X, y_cls, y_reg = [], [], []
-    for i in range(n_lags, len(df)):
-        # Features: use values from i-n_lags+1 to i (inclusive, present included)
-        X_feats = df[features].iloc[i - n_lags + 1:i+1].values
-        # Target lags: use values from i-n_lags to i-1 (present excluded)
-        target_lags = df[target_col].iloc[i - n_lags:i].values.reshape(-1, 1)
-        # Concatenate features and target lags along the last axis
-        X_window = np.concatenate([X_feats, target_lags], axis=1)
-        target = df[target_col].iloc[i]
-        # Remove samples with any NaN or inf in features or target
-        if not (np.all(np.isfinite(X_window)) and np.isfinite(target)):
-            continue
-        X.append(X_window)
-        y_cls.append(1 if target == 0 else 0)
-        y_reg.append(target)
-    return X, y_cls, y_reg
+    # Drop rows with missing/infinite values first
+    df = df.copy()
+    df = df.replace([np.inf, -np.inf], np.nan)
+    df = df.dropna(subset=features + [target_col])
+
+    data_feats = df[features].to_numpy()
+    data_target = df[target_col].to_numpy()
+
+    T = len(df)
+    if T < n_lags:
+        return [], [], []
+
+    # Use sliding window for features (present included)
+    feats_window = np.lib.stride_tricks.sliding_window_view(data_feats, (n_lags, data_feats.shape[1]))
+    feats_window = feats_window[:, 0, :, :]  # shape: (T - n_lags + 1, n_lags, n_features)
+
+    # Use sliding window for target lags (present included)
+    target_lags = np.lib.stride_tricks.sliding_window_view(data_target, n_lags)
+    # shape: (T - n_lags + 1, n_lags)
+
+    # Get present target values (y) -- last value in each window
+    y = target_lags[:, -1]
+    # Use all n_lags values for target lags
+    target_lags_expanded = target_lags.reshape(target_lags.shape[0], n_lags, 1)
+
+    # Cut both arrays to same final length
+    min_len = min(len(feats_window), len(target_lags_expanded))
+    feats_window = feats_window[-min_len:]
+    target_lags_expanded = target_lags_expanded[-min_len:]
+    y = y[-min_len:]
+
+    # Concatenate features and target lags
+    X = np.concatenate([feats_window, target_lags_expanded], axis=2)  # shape: (N, n_lags, f+1)
+
+    # Filter finite rows
+    mask = np.isfinite(X).all(axis=(1, 2)) & np.isfinite(y)
+    X = X[mask]
+    y_reg = y[mask]
+    y_cls = (y_reg == 0).astype(float)
+
+    return X.tolist(), y_cls.tolist(), y_reg.tolist()
+
 
 def fetch_and_save_pools(
     api_key: str,
@@ -229,7 +250,6 @@ def load_pool_data(hdf5_path: str, pool_address: str) -> pd.DataFrame:
         KeyError: If pool not found.
         ValueError: If no data found for pool.
     """
-    import h5py
     pool_key = f'pool_{pool_address.lower()}'
     with h5py.File(hdf5_path, 'r') as h5f:
         if pool_key not in h5f:
@@ -255,6 +275,37 @@ def load_pool_data(hdf5_path: str, pool_address: str) -> pd.DataFrame:
         else:
             raise ValueError(f"No data found for pool {pool_address} in {hdf5_path}")
 
+def load_selected_pools_in_memory(hdf5_path: str, pool_addresses: list) -> Dict[str, pd.DataFrame]:
+    """
+    Load only the specified pools' data from HDF5 as a dict of address -> DataFrame, kept in memory.
+    Args:
+        hdf5_path (str): Path to HDF5 file.
+        pool_addresses (list): List of pool addresses to load.
+    Returns:
+        Dict[str, pd.DataFrame]: Mapping pool address to DataFrame.
+    """
+    pool_dict = {}
+    with h5py.File(hdf5_path, 'r') as h5f:
+        for addr in pool_addresses:
+            key = f'pool_{addr.lower()}'
+            if key in h5f:
+                grp = h5f[key]
+                dfs = []
+                if 'data' in grp and 'num_columns' in grp:
+                    data = grp['data'][()]
+                    num_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['num_columns'][()]]
+                    dfs.append(pd.DataFrame(data, columns=num_columns))
+                if 'strings' in grp and 'str_columns' in grp:
+                    str_data = grp['strings'][()]
+                    str_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['str_columns'][()]]
+                    dfs.append(pd.DataFrame(str_data, columns=str_columns))
+                if dfs:
+                    df = pd.concat(dfs, axis=1)
+                    if 'datetime' in df.columns:
+                        df['datetime'] = pd.to_datetime(df['datetime'].astype(str), errors='coerce')
+                    pool_dict[addr] = df
+    return pool_dict
+
 def load_all_pools_in_memory(hdf5_path: str) -> Dict[str, pd.DataFrame]:
     """
     Load all pools' data from HDF5 as a dict of address -> DataFrame, kept in memory, using h5py.
@@ -263,7 +314,6 @@ def load_all_pools_in_memory(hdf5_path: str) -> Dict[str, pd.DataFrame]:
     Returns:
         Dict[str, pd.DataFrame]: Mapping pool address to DataFrame.
     """
-    import h5py
     pool_dict = {}
     with h5py.File(hdf5_path, 'r') as h5f:
         for key in h5f.keys():
@@ -376,7 +426,6 @@ def get_saved_pool_addresses(hdf5_path: str) -> List[str]:
     Returns:
         List[str]: List of pool addresses.
     """
-    import h5py
     with h5py.File(hdf5_path, 'r') as h5f:
         if 'meta' in h5f:
             meta_grp = h5f['meta']
@@ -388,122 +437,102 @@ def get_saved_pool_addresses(hdf5_path: str) -> List[str]:
         pools = [k for k in h5f.keys() if k.startswith('pool_')]
         return [p[5:] for p in pools]
 
+
 class LPsDataset(Dataset):
-    """
-    PyTorch Dataset for LSTM pretraining/fine-tuning on multiple pools from HDF5.
-    Each item is a tuple (X, y_cls, y_reg) for supervised learning.
-    Allows flexible split: 'train', 'val', or 'test' using split_dates dict.
-    split_dates include 'train_start', 'train_end', 'val_start', 'val_end', 'test_start', 'test_end'.
-    Args:
-        hdf5_path (str): Path to HDF5 file.
-        pool_addresses (list, optional): List of pool addresses to load. If None, loads all saved pool addresses.
-        features (list, optional): List of feature columns to use.
-        target (str, optional): Name of target column.
-        n_lags (int, optional): Number of lag steps for LSTM.
-        split (str, optional): 'train', 'val', or 'test'.
-        split_dates (dict, optional): Dict with keys 'train_start', 'train_end', 'val_start', 'val_end', 'test_start', 'test_end' for splitting.
-        verbose (int, optional): Print progress if 1.
-    """
     def __init__(
         self,
         hdf5_path: str,
-        pool_addresses: list = None,
-        features: list = None,
+        pool_addresses: List[str] = None,
+        features: List[str] = None,
         target: str = None,
         n_lags: int = 1,
         split: str = 'train',
         split_dates: dict = None,
+        feature_scaler=None,
+        target_reg_scaler=None,
         verbose: int = 1,
         num_workers: int = 16
     ):
-        """
-        Args:
-            hdf5_path: Path to HDF5 file.
-            pool_addresses: List of pool addresses to load. If None, loads all saved pool addresses.
-            features: List of feature columns to use.
-            target: Name of target column.
-            n_lags: Number of lag steps for LSTM.
-            split: 'train', 'val', or 'test'.
-            split_dates: Dict with keys 'train_start', 'train_end', 'val_start', 'val_end', 'test_start', 'test_end' for splitting.
-            verbose: Print progress if 1.
-        """
-        if pool_addresses is None:
-            pool_addresses = get_saved_pool_addresses(hdf5_path)
         self.X, self.y_cls, self.y_reg = [], [], []
+        self.split = split
+        self.feature_scaler = feature_scaler
+        self.target_reg_scaler = target_reg_scaler
+        scaler_lock = Lock()
+
+        data_by_pool = load_selected_pools_in_memory(hdf5_path, pool_addresses)
+        if pool_addresses is None:
+            pool_addresses = list(data_by_pool.keys())
         total = len(pool_addresses)
-        def process_chunk(address_chunk):
-            chunk_X, chunk_y_cls, chunk_y_reg = [], [], []
-            for addr in address_chunk:
-                try:
-                    df = load_pool_data(hdf5_path, addr)
-                except (KeyError, FileNotFoundError, Exception):
-                    continue
-                # Flexible split logic with custom start/end for each split
-                if split_dates is not None:
-                    if split == 'train':
-                        start = split_dates.get('train_start', None)
-                        end = split_dates.get('train_end', None)
-                        if start is not None:
-                            df = df[df['datetime'] >= pd.to_datetime(start)]
-                        if end is not None:
-                            df = df[df['datetime'] <= pd.to_datetime(end)]
-                        df = df.copy()
-                    elif split == 'val':
-                        start = split_dates.get('val_start', None)
-                        end = split_dates.get('val_end', None)
-                        if start is not None:
-                            df = df[df['datetime'] >= pd.to_datetime(start)]
-                        if end is not None:
-                            df = df[df['datetime'] <= pd.to_datetime(end)]
-                        df = df.copy()
-                    elif split == 'test':
-                        start = split_dates.get('test_start', None)
-                        end = split_dates.get('test_end', None)
-                        if start is not None:
-                            df = df[df['datetime'] >= pd.to_datetime(start)]
-                        if end is not None:
-                            df = df[df['datetime'] <= pd.to_datetime(end)]
-                        df = df.copy()
-                df['pool'] = addr
-                df = dropna(df, features, target)
-                X, y_cls, y_reg = get_X_y(df, features, target, n_lags)
-                chunk_X.extend(X)
-                chunk_y_cls.extend(y_cls)
-                chunk_y_reg.extend(y_reg)
-            return chunk_X, chunk_y_cls, chunk_y_reg
 
-        # Split pool_addresses into chunks
-        def chunkify(lst, n):
-            return [lst[i::n] for i in range(n)]
+        def filter_and_process(addr):
+            df = data_by_pool.get(addr)
+            if df is None or df.empty:
+                return [], [], []
 
-        address_chunks = chunkify(pool_addresses, num_workers)
-        results = []
+            # Time filtering
+            if split_dates:
+                if split == 'train':
+                    start, end = split_dates.get('train_start'), split_dates.get('train_end')
+                elif split == 'val':
+                    start, end = split_dates.get('val_start'), split_dates.get('val_end')
+                elif split == 'test':
+                    start, end = split_dates.get('test_start'), split_dates.get('test_end')
+                else:
+                    start = end = None
+                if start:
+                    df = df[df['datetime'] >= pd.to_datetime(start)]
+                if end:
+                    df = df[df['datetime'] <= pd.to_datetime(end)]
+
+            df = df.dropna(subset=features + [target])
+            if df.empty:
+                return [], [], []
+
+            # Scale features and target
+            X_feats = df[features].values
+            y_target = df[target].values.reshape(-1, 1)
+
+            if not np.all(np.isfinite(y_target)):
+                print(f"[{addr}] Skipping due to bad target values: {y_target[~np.isfinite(y_target)]}")
+                return [], [], []
+
+            if self.split == 'train':
+                with scaler_lock:
+                    self.feature_scaler.partial_fit(X_feats)
+                    self.target_reg_scaler.partial_fit(y_target)
+
+            X_feats_scaled = self.feature_scaler.transform(X_feats)
+            y_target_scaled = self.target_reg_scaler.transform(y_target).flatten()
+
+            df.loc[:, features] = X_feats_scaled
+            df.loc[:, target] = y_target_scaled
+
+            df['pool'] = addr  
+            return get_X_y(df, features, target, n_lags)
+
+        print(f"Loading {total} pools using {num_workers} threads...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-            future_to_chunk = {executor.submit(process_chunk, chunk): idx for idx, chunk in enumerate(address_chunks)}
-            for i, future in enumerate(concurrent.futures.as_completed(future_to_chunk), 1):
-                X, y_cls, y_reg = future.result()
-                results.append((X, y_cls, y_reg))
+            futures = [executor.submit(filter_and_process, addr) for addr in pool_addresses]
+            for i, f in enumerate(futures, 1):
+                X, y_cls, y_reg = f.result()
+                self.X.extend(X)
+                self.y_cls.extend(y_cls)
+                self.y_reg.extend(y_reg)
                 if verbose:
-                    print(f"Loaded chunk {i}/{num_workers} ({len(X)} samples)")
-        for idx, (X, y_cls, y_reg) in enumerate(results, 1):
-            self.X.extend(X)
-            self.y_cls.extend(y_cls)
-            self.y_reg.extend(y_reg)
-            # if verbose:
-            #     print(f"{idx}/{total}: Pool processed (threaded)")
+                    print(f"Processed {i}/{total}: {len(X)} samples")
+
         if self.X:
-            self.X = torch.tensor(np.array(self.X), dtype=torch.float32)  # Convert list of arrays to single ndarray first
-            self.y_cls = torch.tensor(self.y_cls, dtype=torch.float32)
-            self.y_reg = torch.tensor(self.y_reg, dtype=torch.float32)
+            self.X = torch.tensor(np.array(self.X), dtype=torch.float32)
+            self.y_cls = torch.tensor(np.array(self.y_cls), dtype=torch.float32)
+            self.y_reg = torch.tensor(np.array(self.y_reg), dtype=torch.float32)
         else:
-            self.X = torch.empty((0, n_lags, len(features)), dtype=torch.float32)
+            d = len(features) + n_lags - 1
+            self.X = torch.empty((0, n_lags, d), dtype=torch.float32)
             self.y_cls = torch.empty((0,), dtype=torch.float32)
             self.y_reg = torch.empty((0,), dtype=torch.float32)
 
-    def __len__(self) -> int:
-        """Return the number of samples in the dataset."""
+    def __len__(self):
         return len(self.X)
 
-    def __getitem__(self, idx: int):
-        """Return (X, y_cls, y_reg) tuple for sample idx."""
+    def __getitem__(self, idx):
         return self.X[idx], self.y_cls[idx], self.y_reg[idx]

@@ -2,17 +2,15 @@
 import os
 import argparse
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.distributed as dist
-import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
+from sklearn.preprocessing import StandardScaler
 from random import shuffle
 import random
 import sys
 from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
 from python.ml.PLV.model import ZeroInflatedLSTM, ZeroInflatedTransformer
 from python.utils.distributed_utils import *
+from python.utils.data_utils import save_scalers
 
 
 def main(args):
@@ -58,6 +56,8 @@ def main(args):
     N = args.n_pools
     pool_addresses = pool_addresses[:N]
     print0("Loading dataset...")
+    feature_scaler = StandardScaler()
+    target_reg_scaler = StandardScaler()
     train_dataset = LPsDataset(
         hdf5_path=hdf5_path,
         pool_addresses=pool_addresses,
@@ -66,6 +66,8 @@ def main(args):
         n_lags=n_lags,
         split='train',
         split_dates=split_dates,
+        feature_scaler=feature_scaler,
+        target_reg_scaler=target_reg_scaler,
         num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)),
     )
     val_dataset = LPsDataset(
@@ -76,6 +78,8 @@ def main(args):
         n_lags=n_lags,
         split='val',
         split_dates=split_dates,
+        feature_scaler=feature_scaler,
+        target_reg_scaler=target_reg_scaler,
         num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)),
     )
     print0(f"Number of training samples: {len(train_dataset)}")
@@ -117,7 +121,10 @@ def main(args):
         device=device
     )
     print0('Training complete.')
-    save0(model, model_path)
+    save_full_model(model, None, model_path)
+    # Save scalers for later finetuning
+    scaler_path = os.path.splitext(model_path)[0] + '_scalers.pkl'
+    save_scalers(feature_scaler, target_reg_scaler, scaler_path)
     destroy_process_group()
 
 

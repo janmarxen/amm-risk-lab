@@ -1,40 +1,12 @@
 import os
 import torch
 from torch.utils.data import DataLoader
-import numpy as np
-import matplotlib.pyplot as plt
 import argparse
 import sys
-from python.ml.PLV.data_io import LPsDataset, fetch_and_save_pools
+from python.ml.PLV.data_io import LPsDataset
 from python.ml.PLV.model import ZeroInflatedLSTM, ZeroInflatedTransformer
-from python.utils.distributed_utils import setup, print0, save0, destroy_process_group
-
-def naive_predict(series):
-    """Naive model: predicts next value as the current value (persistence)."""
-    if hasattr(series, 'shift'):
-        return series.shift(1)
-    else:
-        arr = np.asarray(series)
-        result = np.empty_like(arr)
-        result[0] = np.nan
-        result[1:] = arr[:-1]
-        return result
-
-def save_actual_vs_predicted(y_true, y_pred, title="Actual vs Predicted Liquidity Return", filename="actual_vs_predicted.png"):
-    plt.figure(figsize=(14, 5))
-    if hasattr(y_true, 'index'):
-        x = y_true.index
-    else:
-        x = np.arange(len(y_true))
-    plt.plot(x, y_true, label="Actual", color="tab:blue")
-    plt.plot(x, y_pred, label="Predicted", color="tab:orange")
-    plt.title(title)
-    plt.xlabel("Index")
-    plt.ylabel("Liquidity Return")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(filename)
-    plt.close()
+from python.utils.distributed_utils import setup, print0, save0, destroy_process_group, load_full_model
+from python.utils.data_utils import load_scalers
 
 def main():
     local_rank, rank, device = setup()
@@ -42,8 +14,6 @@ def main():
     parser.add_argument('--n_lags', type=int, required=True)
     parser.add_argument('--lstm_units', type=int, required=False, help='Number of LSTM units (required for LSTM)')
     parser.add_argument('--dense_units', type=int, required=True)
-    parser.add_argument('--api_key', type=str, required=True)
-    parser.add_argument('--subgraph_id', type=str, required=True)
     parser.add_argument('--train_start', type=str, required=True)
     parser.add_argument('--train_end', type=str, required=True)
     parser.add_argument('--val_start', type=str, required=True)
@@ -74,7 +44,6 @@ def main():
         print0(f"  {k}: {v}")
     sys.stdout.flush()
     finetune_pool_address = args.finetune_pool_address
-    model_name = args.model_name
     pretrained_model_name = args.pretrained_model_name
     finetuned_model_name = args.finetuned_model_name
     hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data.h5")
@@ -122,9 +91,13 @@ def main():
         print0(f"Unknown model_type: {args.model_type}")
         destroy_process_group()
         sys.exit(1)
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    # Load full model checkpoint
+    model, _ = load_full_model(model, None, model_path, map_location=device)
     model = model.to(device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+    # Load scalers
+    scaler_path = os.path.splitext(model_path)[0] + '_scalers.pkl'
+    feature_scaler, target_reg_scaler = load_scalers(scaler_path)
     # --- Model finetuning ---
     print0("Finetuning model on test pool on training+validation dates...")
     finetune_dataset = LPsDataset(
@@ -135,6 +108,8 @@ def main():
         n_lags=args.n_lags,
         split='train',
         split_dates=split_dates,
+        feature_scaler=feature_scaler,
+        target_reg_scaler=target_reg_scaler,
         verbose=1
     )
     finetune_val_dataset = LPsDataset(
@@ -145,6 +120,8 @@ def main():
         n_lags=args.n_lags,
         split='val',
         split_dates=split_dates,
+        feature_scaler=feature_scaler,
+        target_reg_scaler=target_reg_scaler,
         verbose=1
     )
     finetune_loader = DataLoader(finetune_dataset, batch_size=args.finetune_batch_size, shuffle=True)
