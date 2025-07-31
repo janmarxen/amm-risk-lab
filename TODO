@@ -1,5 +1,5 @@
 Priority:
-- Make sure that scalers are also saved in the model saving. Also, make sure that data is not going back and forth from the CPU/GPU for scaling. It should all be done before the data arrives the GPU. Maybe try to do the scaling in the LPDataset exclusively?
+- Make sure all GPUs have the same scalers (fit the scaler to the data appropriately). Move the saving and loading of the scalers into distributed utils and save/load only with rank0. 
 - Paralellize LPDataset by sending data directly to GPU?
 - Make pretraining, finetuning and testing scripts load best parameters from GS.
 - Ameliorate outlier removal mechanism and see correctness of processed data.

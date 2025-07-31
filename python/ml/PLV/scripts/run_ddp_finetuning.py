@@ -6,7 +6,7 @@ import sys
 from python.ml.PLV.data_io import LPsDataset
 from python.ml.PLV.model import ZeroInflatedLSTM, ZeroInflatedTransformer
 from python.utils.distributed_utils import setup, print0, save0, destroy_process_group, load_full_model
-from python.utils.data_utils import load_scalers
+from python.utils.data_utils import save_scalers, load_scalers
 
 def main():
     local_rank, rank, device = setup()
@@ -139,6 +139,9 @@ def main():
             device=device
         )
         save0(model, finetuned_model_path)
+        # Save scalers after finetuning 
+        scaler_path = os.path.splitext(finetuned_model_path)[0] + '_scalers.pkl'
+        save_scalers(feature_scaler, target_reg_scaler, scaler_path)
         print0("Finetuning complete.")
         destroy_process_group()
 

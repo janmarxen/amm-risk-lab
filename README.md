@@ -1,14 +1,17 @@
 # AMM Risk Lab
 
-This project provides tools for analytics, simulation, and parameter calibration for Automated Market Maker (AMM) liquidity pools (LPs), with a focus on Uniswap v3. **The end goal is a full pipeline that generates synthetic price paths (using Geometric Brownian Motion), predicts liquidity and volume with LSTM and Transformer models, and then computes key risk and return metrics (impermanent loss, fee accumulation, APR, APY, VaR) from these predictions.**
-
-- Fetching and analyzing LP data from The Graph subgraphs
+This project provides tools for analytics, simulation, and automated rebalancing for Automated Market Maker (AMM) liquidity pools (LPs), with a focus on Uniswap v3. The end goals are:
+ 1. a full pipeline that generates synthetic price paths (using Geometric Brownian Motion), predicts liquidity and volume with LSTM and Transformer models, and then computes key risk and return metrics (impermanent loss, fee accumulation, APR, APY, VaR) from these predictions.
+ 2. a fully autonomous RL bot for automated LP position rebalancing which uses simulation for decision making. 
+ 
+Features include:
+- Fetching and analyzing LP data from The Graph's Subgraphs
 - Simulating LP strategies and computing estimations for impermanent loss, fee accumulation, APR, APY, and VaR (using ML-predicted liquidity/volume)
 - Parameter calibration and autoregressive modeling for pool dynamics
-- Currency conversion utilities (e.g., token to USD)
-- Price path generation (Geometric Brownian Motion, CPU/GPU)
-- **ML pipeline for predicting liquidity/volume from prices (LSTM, Transformer)**
-- **Future: Reinforcement Learning Liquidity Pool bot for optimal strategy**
+- Real-time LP token conversion utilities (e.g., token to USD)
+- Price path generation (Geometric Brownian Motion, with GPU support)
+- ML pipeline for predicting liquidity/volume from prices (LSTM, Transformer)
+- Future: Reinforcement Learning Liquidity Pool bot for optimal strategy
 
 ## Structure
 
@@ -16,16 +19,12 @@ This project provides tools for analytics, simulation, and parameter calibration
 - `include/` - C++ headers
 - `scripts/` - Example and test scripts (run as executables)
 - `utils/` - utility data
+- `python/ml/PLV` - Price-Liquidity-Volume models for predicting liquidity and volume from prices. Used for Monte-Carlo simulations in `src/`.  
 - `CMakeLists.txt` - Build configuration
 
 ## Requirements
-
-- C++17 or later
-- [Eigen3](https://eigen.tuxfamily.org/) (for matrix operations)
-- [cURL](https://curl.se/libcurl/) (for HTTP requests)
-- [nlohmann/json](https://github.com/nlohmann/json) (for JSON parsing)
-- CUDA (optional, for GPU price simulation)
-- CMake >= 3.10
+See `$HOME$/course/sc_venv_template/requirements.txt` and 
+[Supercomputing Environment Template](https://gitlab.jsc.fz-juelich.de/kesselheim1/sc_venv_template/-/tree/master?ref_type=heads).
 
 ## Installation
 _To be added: build instructions, dependencies, CUDA setup_
@@ -37,16 +36,6 @@ cmake ..
 make
 ```
 
-## Usage
-
-_To be added: Create proper folder with examples later_
-
-Example: Simulate an LP strategy
-
-```sh
-./test_lp_strategy <apiSubgraphs> <idSubgraphs> <poolAddress>
-```
-
 ## License
 
 See [LICENSE](LICENSE) for details.
@@ -56,29 +45,15 @@ _To be added: guidelines, TODOs, structure_
 
 ## Python ML Pipeline (Uniswap V3 Analytics & ML)
 
-This project includes a robust, modular pipeline for Uniswap V3 pool analytics and machine learning, supporting data fetching, feature engineering, storage, PyTorch dataset creation, LSTM model training, grid search, and evaluation. The workflow is fully automated and configurable from a single batch script. In the future, supercomputer support and GPU training will be implemented. 
+This project includes a modular, distributed pipeline for Uniswap V3 pool analytics and machine learning. It supports data fetching, feature engineering, HDF5 storage, PyTorch dataset creation, distributed (DDP) model pretraining, grid search, finetuning, and evaluation for both LSTM and Transformer models.
 
-### Structure
-- `python/ml/PLV/scripts/batch_run.sh`: Main batch script to run the full pipeline (data download, training, testing)
+### Structure (Distributed Workflow)
+- `python/ml/PLV/scripts/batch_run_data_download.sh`: Batch script to run parallel data download for multiple pools
 - `python/ml/PLV/scripts/run_data_download.py`: Downloads and stores pool data to HDF5
-- `python/ml/PLV/scripts/run_training.py`: Trains the LSTM model on multiple pool data
-- `python/ml/PLV/scripts/run_testing.py`: Loads, finetunes, and evaluates the model on a specific pool. Each pool should have its own finetuned model.
+- `python/ml/PLV/scripts/run_ddp_gridsearch.py`: Distributed grid search for hyperparameter tuning
+- `python/ml/PLV/scripts/run_ddp_pretraining.py`: Distributed (DDP) pretraining of the model on multiple pools
+- `python/ml/PLV/scripts/run_ddp_finetuning.py`: Distributed finetuning of the pretrained model on a specific pool
+- `python/ml/PLV/scripts/run_testing.py`: Evaluation/testing of the finetuned model
 - `python/ml/PLV/data_io.py`: Feature engineering, dataset utilities
-- `python/ml/PLV/model.py`: ZeroInflatedLSTM model, custom loss, scaling, early stopping
-
-### Requirements
-- Python 3.8+
-- PyTorch, pandas, numpy, scikit-learn, matplotlib, tables (PyTables)
-
-### Usage
-
-1. **Configure the pipeline**: Edit `python/ml/PLV/scripts/batch_run.sh` to set all parameters at the top (API key, subgraph ID, date ranges, model hyperparameters, number of pools, etc).
-
-2. **Run the pipeline**:
-   ```sh
-   ./python/ml/PLV/scripts/batch_run.sh
-   ```
-   This will:
-   - Download pool data (with `N_POOLS` limit and always including the main pool)
-   - Train the LSTM (or Transformer) model with early stopping (using validation split)
-   - Finetune and evaluate the model on the main pool
+- `python/ml/PLV/model.py`: Model definitions (ZeroInflatedLSTM, Transformer), custom loss, early stopping
+- `python/ml/PLV/utils/distributed_utils.py`: Utilities for distributed training, model/scaler saving/loading
