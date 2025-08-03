@@ -3,7 +3,7 @@ Priority:
 - Implement model loading in C++ for inference (or create microservice?)
 - Create test script using PLV models.
 
-- Implement LayerNorm and fit scaler per pool in pretraining (fit_transform at each pool processing in LPDataset).
+- Fit scaler per pool in pretraining (fit_transform at each pool processing in LPDataset).
 - Implement Gridsearch
 - Ameliorate outlier removal mechanism and see correctness of processed data.
 - Print out the cross-table after testing.

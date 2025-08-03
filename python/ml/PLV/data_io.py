@@ -588,9 +588,6 @@ class LPsDataset(Dataset):
                 return [], [], []
             # Fit scalers if they are not None
             if self.feature_scaler is not None and self.target_reg_scaler is not None:
-                with scaler_lock:
-                    self.feature_scaler.partial_fit(X_feats)
-                    self.target_reg_scaler.partial_fit(y_target)
                 # Use the scalers to transform the data
                 X_feats_scaled = self.feature_scaler.transform(X_feats)
                 y_target_scaled = self.target_reg_scaler.transform(y_target).flatten()

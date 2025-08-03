@@ -269,7 +269,7 @@ class ZeroInflatedTransformer(ZeroInflatedTSModule):
         self.d_model = d_model
         self.pos_encoder = nn.Parameter(torch.zeros(1, n_lags, d_model))
         self.input_proj = nn.Linear(input_size, d_model)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads, dim_feedforward=d_model*2, dropout=dropout, batch_first=True)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads, dim_feedforward=d_model*2, dropout=dropout, batch_first=True, norm_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.shared_dense = nn.Linear(d_model, dense_units)
         self.classifier = nn.Linear(dense_units, 1)
