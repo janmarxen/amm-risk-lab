@@ -249,6 +249,19 @@ class ZeroInflatedTransformer(ZeroInflatedTSModule):
         dense_units (int): Number of units in shared dense layer.
         dropout (float): Dropout rate.
     """
+    """
+    Transformer-based zero-inflated time series model.
+    Uses a transformer encoder to process sequential input data, with shared dense layers and separate
+    heads for classification (zero/non-zero) and regression (value prediction). Supports feature and target scaling.
+    Args:
+        input_size (int): Number of input features.
+        n_lags (int): Number of lag steps.
+        d_model (int): Transformer model dimension.
+        num_heads (int): Number of attention heads.
+        num_layers (int): Number of transformer layers.
+        dense_units (int): Number of units in shared dense layer.
+        dropout (float): Dropout rate.
+    """
     def __init__(self, input_size, n_lags=1, d_model=32, num_heads=2, num_layers=2, dense_units=16, dropout=0.1):
         super().__init__()
         self.input_size = input_size

@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=00:40:00
+#SBATCH --time=01:30:00
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 LOG_DIR=/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_logs
@@ -23,7 +23,7 @@ mkdir -p /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_l
 mkdir -p /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_results
 
 ### Configuration ###
-N_POOLS=50000
+N_POOLS=2000
 MODEL_NAME="transformer_model_gs"
 FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,price_ma_3h,price_ma_6h,price_ma_24h,liquidity_ma_3h,liquidity_ma_6h,liquidity_ma_24h,hour,day_of_week,month,season"
 TARGET="liquidity_return"
@@ -71,5 +71,4 @@ srun --cpu_bind=none \
     --n_pools $N_POOLS \
     --features "$FEATURES" \
     --target "$TARGET" \
-    --model_type transformer \
     --result_dir /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_results

@@ -1,16 +1,32 @@
+"""
+run_ddp_pretraining.py
+
+Distributed pretraining script for Uniswap V3 ML models using PyTorch DDP.
+
+High-level steps:
+1. Initialize distributed process group and set up device for each rank.
+2. Parse command-line arguments for model/data configuration.
+3. Load pool addresses and shuffle/select a subset for training.
+4. On rank 0, fit feature and target scalers on a sample of the data; broadcast to all ranks.
+5. Construct distributed training and validation datasets using synchronized scalers.
+6. Build the Transformer model and wrap with DistributedDataParallel.
+7. Train the model using distributed data loaders and early stopping.
+8. Save the trained model and scalers (only on rank 0).
+9. Clean up and destroy the process group.
+"""
 
 import os
 import argparse
 import torch
 from torch.utils.data import DataLoader
+import torch.distributed as dist
 from sklearn.preprocessing import StandardScaler
 from random import shuffle
 import random
 import sys
-from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
-from python.ml.PLV.model import ZeroInflatedLSTM, ZeroInflatedTransformer
+from python.ml.PLV.data_io import LPsDataset, fit_scalers, get_saved_pool_addresses
+from python.ml.PLV.model import ZeroInflatedTransformer
 from python.utils.distributed_utils import *
-from python.utils.data_utils import save_scalers
 
 
 def main(args):
@@ -32,7 +48,6 @@ def main(args):
         sys.exit(1)
     n_lags = args.n_lags
     batch_size = args.batch_size
-    lstm_units = args.lstm_units
     dense_units = args.dense_units
     lr = args.lr
     epochs = args.epochs
@@ -55,9 +70,29 @@ def main(args):
     shuffle(pool_addresses)
     N = args.n_pools
     pool_addresses = pool_addresses[:N]
+    # Fit scalers on rank 0
+    print0("Fitting scalers on rank 0...")
+    if rank == 0:
+        feature_scaler, target_reg_scaler = fit_scalers(
+            hdf5_path=hdf5_path,
+            pool_addresses=pool_addresses,
+            features=features,
+            target=target,
+            split_dates=split_dates,
+            verbose=0,
+            num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)),
+            # sample_size_pct=0.1,
+            sample_size_pct=0.2, # Reduced sample size for faster fitting
+        )
+    else:
+        feature_scaler = StandardScaler()
+        target_reg_scaler = StandardScaler()
+    # Broadcast fitted scalers from rank 0 to all ranks
+    scaler_list = [feature_scaler, target_reg_scaler]
+    dist.broadcast_object_list(scaler_list, src=0)
+    feature_scaler, target_reg_scaler = scaler_list
+    print0("Scalers loaded and broadcasted to all ranks.")
     print0("Loading dataset...")
-    feature_scaler = StandardScaler()
-    target_reg_scaler = StandardScaler()
     train_dataset = LPsDataset(
         hdf5_path=hdf5_path,
         pool_addresses=pool_addresses,
@@ -82,6 +117,14 @@ def main(args):
         target_reg_scaler=target_reg_scaler,
         num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)),
     )
+    # # Print train dataset stats (only on rank 0)
+    # if rank == 0 and len(train_dataset) > 0:
+    #     X = train_dataset.X.cpu().numpy()
+    #     y_reg = train_dataset.y_reg.cpu().numpy()
+    #     print("[Train Dataset] Features mean:", X.mean(axis=(0, 1)))
+    #     print("[Train Dataset] Features std:", X.std(axis=(0, 1)))
+    #     print("[Train Dataset] Target mean:", y_reg.mean())
+    #     print("[Train Dataset] Target std:", y_reg.std())
     print0(f"Number of training samples: {len(train_dataset)}")
     print0(f"Number of validation samples: {len(val_dataset)}")
     train_sampler = torch.utils.data.distributed.DistributedSampler(
@@ -90,25 +133,17 @@ def main(args):
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, sampler=train_sampler, num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)), pin_memory=True, drop_last=True)
     val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, sampler=val_sampler, pin_memory=True, drop_last=False)
+        val_dataset, batch_size=batch_size, sampler=val_sampler, num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)), pin_memory=True, drop_last=False)
     input_size = len(features) + 1
-    if args.model_type == "lstm":
-        model = ZeroInflatedLSTM(
-            input_size=input_size,
-            n_lags=n_lags,
-            lstm_units=lstm_units,
-            dense_units=dense_units
-        )
-    else:
-        model = ZeroInflatedTransformer(
-            input_size=input_size,
-            n_lags=n_lags,
-            d_model=args.d_model,
-            num_heads=args.num_heads,
-            num_layers=args.num_layers,
-            dense_units=dense_units,
-            dropout=args.dropout
-        )
+    model = ZeroInflatedTransformer(
+        input_size=input_size,
+        n_lags=n_lags,
+        d_model=args.d_model,
+        num_heads=args.num_heads,
+        num_layers=args.num_layers,
+        dense_units=dense_units,
+        dropout=args.dropout
+    )
     model = model.to(device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
     model.module.fit_distributed(
@@ -121,10 +156,20 @@ def main(args):
         device=device
     )
     print0('Training complete.')
+    # Save the full model taking DDP into account
     save_full_model(model, None, model_path)
-    # Save scalers for later finetuning
-    scaler_path = os.path.splitext(model_path)[0] + '_scalers.pkl'
-    save_scalers(feature_scaler, target_reg_scaler, scaler_path)
+    # Save transformer model hyperparameters to JSON for later finetuning
+    save_model_arch0(
+        model_path,
+        n_lags=n_lags,
+        d_model=args.d_model,
+        num_heads=args.num_heads,
+        num_layers=args.num_layers,
+        dense_units=dense_units,
+        dropout=args.dropout,
+        features=features,
+        target=target
+    )
     destroy_process_group()
 
 
@@ -132,7 +177,6 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--n_lags', type=int, required=True)
     parser.add_argument('--batch_size', type=int, required=True)
-    parser.add_argument('--lstm_units', type=int, required=False, help='Number of LSTM units (required for LSTM)')
     parser.add_argument('--dense_units', type=int, required=True)
     parser.add_argument('--lr', type=float, required=True)
     parser.add_argument('--epochs', type=int, required=True)
@@ -143,7 +187,6 @@ def parse_args():
     parser.add_argument('--test_start', type=str, required=True)
     parser.add_argument('--test_end', type=str, required=True)
     parser.add_argument('--model_name', type=str, required=False, default="model")
-    parser.add_argument('--model_type', type=str, required=True, choices=['lstm', 'transformer'], help='Model type to use')
     parser.add_argument('--d_model', type=int, default=32)
     parser.add_argument('--num_heads', type=int, default=2)
     parser.add_argument('--num_layers', type=int, default=2)

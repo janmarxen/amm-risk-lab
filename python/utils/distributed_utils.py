@@ -6,6 +6,8 @@ Utilities for distributed training and checkpointing in PyTorch, including proce
 import os
 import functools
 import sys
+import pickle
+import json
 
 import torch
 from torch.distributed import checkpoint as dcp
@@ -75,19 +77,20 @@ def print0(*args, **kwargs):
 
 def save0(*args, **kwargs):
     """
-    Save a checkpoint only on the root process using torch.save.
+    Save only the underlying model's state_dict (not the DDP wrapper) to the given path, only on the root process.
+    This ensures the model can be loaded outside a distributed context.
+    Usage:
+        save0(model, path)  # model can be DDP-wrapped or not
     Args:
-        *args: Arguments for torch.save.
-        **kwargs: Keyword arguments for torch.save.
+        model: PyTorch model (possibly DDP-wrapped)
+        path: Path to save the state_dict
     """
-
-    """Pass the given arguments to `torch.save`, but only on the root
-    process.
-    """
-    # We do *not* want to write to the same location with multiple
-    # processes at the same time.
     if is_root_process():
-        torch.save(*args, **kwargs)
+        model, path = args[0], args[1]
+        if hasattr(model, 'module'):
+            torch.save(model.module.state_dict(), path)
+        else:
+            torch.save(model.state_dict(), path)
 
 
 def save_full_model(model, optimizer=None, *args, **kwargs):
@@ -122,7 +125,9 @@ def save_full_model(model, optimizer=None, *args, **kwargs):
         )
         cpu_state['optimizer'] = optim_state_dict
 
-    save0(cpu_state, *args, **kwargs)
+    # Save the cpu_state dict directly, not via save0 (which expects a model)
+    if is_root_process():
+        torch.save(cpu_state, args[0])
             
 
 def load_full_model(model, optimizer=None, *args, **kwargs):
@@ -177,3 +182,50 @@ def atomic_print(*args, device=None, **kwargs):
     torch.distributed.barrier()
 
 
+def save_scalers0(feature_scaler, target_reg_scaler, path):
+    """
+    Save feature and target scalers to a file using pickle, only on rank 0.
+    Args:
+        feature_scaler: Fitted feature scaler (e.g., StandardScaler)
+        target_reg_scaler: Fitted target scaler (e.g., StandardScaler)
+        path: Path to save the scalers (should end with .pkl)
+    """
+    if is_root_process():
+        with open(path, 'wb') as f:
+            pickle.dump({'feature_scaler': feature_scaler, 'target_reg_scaler': target_reg_scaler}, f)
+
+def load_scalers(path):
+    """
+    Load feature and target scalers from a pickle file.
+    Args:
+        path: Path to the saved scalers (.pkl)
+    Returns:
+        (feature_scaler, target_reg_scaler) 
+    """
+    with open(path, 'rb') as f:
+        scalers = pickle.load(f)
+        return scalers['feature_scaler'], scalers['target_reg_scaler']
+    
+def save_model_arch0(model_path, n_lags, d_model, num_heads, num_layers, dense_units, dropout, features, target):
+    """
+    Save transformer model architecture as JSON, only on rank 0.
+    Args:
+        model_path (str): Path to the model .pt file (used as base for JSON filename)
+        n_lags, d_model, num_heads, num_layers, dense_units, dropout: Transformer hyperparameters
+        features (list): List of feature names
+        target (str): Target column name
+    """
+    arch_path = os.path.splitext(model_path)[0] + '_arch.json'
+    if is_root_process():
+        arch_dict = {
+            'n_lags': n_lags,
+            'd_model': d_model,
+            'num_heads': num_heads,
+            'num_layers': num_layers,
+            'dense_units': dense_units,
+            'dropout': dropout,
+            'features': features,
+            'target': target
+        }
+        with open(arch_path, 'w') as f:
+            json.dump(arch_dict, f, indent=2)

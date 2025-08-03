@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=liquidity_pretraining
+#SBATCH --job-name=transformer_liquidity_pretraining
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4  
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=00:45:00
+#SBATCH --time=02:00:00
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
 
@@ -34,25 +34,38 @@ set -e
 ### Configuration ###
 API_KEY="d1762c97d76a973e078c5536742bd237"
 SUBGRAPH_ID="5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV"
-N_LAGS=7
-BATCH_SIZE=2048
-D_MODEL=32
+
+MODEL_NAME="transformer_liquidity_pretrained_1"
+N_LAGS=12
+BATCH_SIZE=1024
+D_MODEL=16
 NUM_HEADS=2
-NUM_LAYERS=2
+NUM_LAYERS=1
 DENSE_UNITS=32
-DROPOUT=0.1
+DROPOUT=0.2
 LR=0.001
-EPOCHS=50
-N_POOLS=10000
-MODEL_NAME="transformer_pretrained_liquidity"
+EPOCHS=100
+
+# MODEL_NAME="transformer_liquidity_pretrained_2"
+# N_LAGS=14
+# BATCH_SIZE=1024
+# D_MODEL=16
+# NUM_HEADS=2
+# NUM_LAYERS=1
+# DENSE_UNITS=48
+# DROPOUT=0.3
+# LR=0.001
+# EPOCHS=100
+
+N_POOLS=500
+# N_POOLS=10000
 FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,\
 liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,\
 price_ma_3h,price_ma_6h,price_ma_24h,\
 liquidity_ma_3h,liquidity_ma_6h,liquidity_ma_24h,\
 hour,day_of_week,month,season"
 TARGET="liquidity_return"
-START_DATE="2023-01-01"
-END_DATE="2025-07-01"
+
 TRAIN_START="2023-01-01"
 TRAIN_END="2025-05-01"
 VAL_START="2025-05-02"
@@ -87,5 +100,5 @@ srun --cpu_bind=none bash -c "torchrun_jsc \
     --model_name $MODEL_NAME \
     --n_pools $N_POOLS \
     --features "$FEATURES" \
-    --target "$TARGET" \
-    --model_type transformer"
+    --target "$TARGET" 
+"

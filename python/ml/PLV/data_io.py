@@ -1,5 +1,5 @@
 """
-plv_data_io.py
+data_io.py
 
 Utility functions and PyTorch Dataset for loading, engineering, and preparing Uniswap V3 pool data for ML models.
 """
@@ -8,6 +8,9 @@ import time
 from typing import List, Dict, Tuple
 import numpy as np
 import h5py
+
+from sklearn.preprocessing import StandardScaler
+import random
 
 import torch
 from torch.utils.data import Dataset
@@ -438,6 +441,89 @@ def get_saved_pool_addresses(hdf5_path: str) -> List[str]:
         return [p[5:] for p in pools]
 
 
+def fit_scalers(
+    hdf5_path: str,
+    pool_addresses: list,
+    features: list,
+    target: str,
+    split_dates: dict = None,
+    verbose: int = 1,
+    num_workers: int = 16,
+    sample_size_pct: float = 0.1,
+    feature_scaler=None,
+    target_reg_scaler=None,
+):
+    """
+    Fit feature and target scalers on a random sample of the data.
+    Args:
+        hdf5_path (str): Path to HDF5 file.
+        pool_addresses (list): List of pool addresses to sample from.
+        features (list): List of feature columns.
+        target (str): Target column name.
+        split_dates (dict): Dict with split start/end dates.
+        verbose (int): Print progress if 1.
+        num_workers (int): Number of threads for parallel loading.
+        sample_size_pct (float): Fraction of pool_addresses to use (0 < pct <= 1).
+    Returns:
+        (feature_scaler, target_reg_scaler): Fitted StandardScaler objects.
+    """
+    if not (0 < sample_size_pct <= 1):
+        raise ValueError("sample_size_pct must be in (0, 1]")
+    n_sample = max(1, int(len(pool_addresses) * sample_size_pct))
+    sample_addresses = random.sample(pool_addresses, n_sample)
+    if verbose:
+        print(f"[fit_scalers] Fitting scalers on {n_sample} pools ({sample_size_pct*100:.1f}% of total)")
+    data_by_pool = load_selected_pools_in_memory(hdf5_path, sample_addresses)
+    # Allow passing in existing scalers, else create new ones
+    if feature_scaler is None:
+        feature_scaler = StandardScaler()
+    if target_reg_scaler is None:
+        target_reg_scaler = StandardScaler()
+    scaler_lock = Lock()
+
+    def process_and_partial_fit(addr):
+        df = data_by_pool.get(addr)
+        if df is None or df.empty:
+            return 0, 0
+        # Time filtering (use train split if available)
+        if split_dates:
+            start, end = split_dates.get('train_start'), split_dates.get('train_end')
+            if start:
+                df = df[df['datetime'] >= pd.to_datetime(start)]
+            if end:
+                df = df[df['datetime'] <= pd.to_datetime(end)]
+        df = df.dropna(subset=features + [target])
+        if df.empty:
+            return 0, 0
+        X = df[features].values
+        y = df[target].values.reshape(-1, 1)
+        # Filter out non-finite rows
+        mask = np.isfinite(X).all(axis=1) & np.isfinite(y).flatten()
+        X = X[mask]
+        y = y[mask]
+        if X.shape[0] == 0 or y.shape[0] == 0:
+            return 0, 0
+        with scaler_lock:
+            feature_scaler.partial_fit(X)
+            target_reg_scaler.partial_fit(y)
+        return X.shape[0], y.shape[0]
+
+    total_X, total_y = 0, 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = [executor.submit(process_and_partial_fit, addr) for addr in sample_addresses]
+        for i, f in enumerate(futures, 1):
+            n_x, n_y = f.result()
+            total_X += n_x
+            total_y += n_y
+            if verbose:
+                print(f"[fit_scalers] Processed {i}/{n_sample}: {n_x} feature, {n_y} target samples")
+    if total_X == 0 or total_y == 0:
+        raise ValueError("No data found for fitting scalers.")
+    if verbose:
+        print(f"[fit_scalers] Fitted feature scaler on {total_X} samples, target scaler on {total_y} samples")
+    return feature_scaler, target_reg_scaler
+
+
 class LPsDataset(Dataset):
     def __init__(
         self,
@@ -450,7 +536,7 @@ class LPsDataset(Dataset):
         split_dates: dict = None,
         feature_scaler=None,
         target_reg_scaler=None,
-        verbose: int = 1,
+        verbose: int = 0,
         num_workers: int = 16
     ):
         self.X, self.y_cls, self.y_reg = [], [], []
@@ -458,51 +544,59 @@ class LPsDataset(Dataset):
         self.feature_scaler = feature_scaler
         self.target_reg_scaler = target_reg_scaler
         scaler_lock = Lock()
-
+        # Load the pools' data into memory
         data_by_pool = load_selected_pools_in_memory(hdf5_path, pool_addresses)
         if pool_addresses is None:
             pool_addresses = list(data_by_pool.keys())
         total = len(pool_addresses)
+        # Get start and end dates for the split
+        if split_dates:
+            if split == 'train':
+                start, end = split_dates.get('train_start'), split_dates.get('train_end')
+            elif split == 'val':
+                start, end = split_dates.get('val_start'), split_dates.get('val_end')
+            elif split == 'test':
+                start, end = split_dates.get('test_start'), split_dates.get('test_end')
+            else:
+                start = end = None
 
         def filter_and_process(addr):
             df = data_by_pool.get(addr)
             if df is None or df.empty:
                 return [], [], []
-
             # Time filtering
-            if split_dates:
-                if split == 'train':
-                    start, end = split_dates.get('train_start'), split_dates.get('train_end')
-                elif split == 'val':
-                    start, end = split_dates.get('val_start'), split_dates.get('val_end')
-                elif split == 'test':
-                    start, end = split_dates.get('test_start'), split_dates.get('test_end')
-                else:
-                    start = end = None
-                if start:
-                    df = df[df['datetime'] >= pd.to_datetime(start)]
-                if end:
-                    df = df[df['datetime'] <= pd.to_datetime(end)]
-
+            if start:
+                df = df[df['datetime'] >= pd.to_datetime(start)]
+            if end:
+                df = df[df['datetime'] <= pd.to_datetime(end)]
+            # Drop rows with NaNs in features or target
             df = df.dropna(subset=features + [target])
             if df.empty:
                 return [], [], []
-
             # Scale features and target
             X_feats = df[features].values
             y_target = df[target].values.reshape(-1, 1)
-
+            # Ensure no non-finite values in target
             if not np.all(np.isfinite(y_target)):
-                print(f"[{addr}] Skipping due to bad target values: {y_target[~np.isfinite(y_target)]}")
+                if verbose:
+                    print(f"[{addr}] Skipping due to bad target values: {y_target[~np.isfinite(y_target)]}")
                 return [], [], []
-
-            if self.split == 'train':
+            # Ensure no non-finite values in features
+            if not np.all(np.isfinite(X_feats)):
+                if verbose:
+                    print(f"[{addr}] Skipping due to bad feature values: {X_feats[~np.isfinite(X_feats)]}")
+                return [], [], []
+            # Fit scalers if they are not None
+            if self.feature_scaler is not None and self.target_reg_scaler is not None:
                 with scaler_lock:
                     self.feature_scaler.partial_fit(X_feats)
                     self.target_reg_scaler.partial_fit(y_target)
-
-            X_feats_scaled = self.feature_scaler.transform(X_feats)
-            y_target_scaled = self.target_reg_scaler.transform(y_target).flatten()
+                # Use the scalers to transform the data
+                X_feats_scaled = self.feature_scaler.transform(X_feats)
+                y_target_scaled = self.target_reg_scaler.transform(y_target).flatten()
+            else:
+                X_feats_scaled = X_feats
+                y_target_scaled = y_target.flatten()
 
             df.loc[:, features] = X_feats_scaled
             df.loc[:, target] = y_target_scaled
@@ -510,7 +604,8 @@ class LPsDataset(Dataset):
             df['pool'] = addr  
             return get_X_y(df, features, target, n_lags)
 
-        print(f"Loading {total} pools using {num_workers} threads...")
+        if verbose:
+            print(f"Loading {total} pools using {num_workers} threads...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = [executor.submit(filter_and_process, addr) for addr in pool_addresses]
             for i, f in enumerate(futures, 1):

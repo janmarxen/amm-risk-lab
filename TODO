@@ -1,17 +1,18 @@
 Priority:
-- Make sure all GPUs have the same scalers (fit the scaler to the data appropriately). Move the saving and loading of the scalers into distributed utils and save/load only with rank0. 
-- Paralellize LPDataset by sending data directly to GPU?
-- Make pretraining, finetuning and testing scripts load best parameters from GS.
+
+- Implement model loading in C++ for inference (or create microservice?)
+- Create test script using PLV models.
+
+- Implement LayerNorm and fit scaler per pool in pretraining (fit_transform at each pool processing in LPDataset).
+- Implement Gridsearch
 - Ameliorate outlier removal mechanism and see correctness of processed data.
-- Make autoregressive testing part of the pipeline.
 - Print out the cross-table after testing.
 - Implement Regularization techniques
 - Implement data augmentation techniques
-- Change pre training validation to main pool?
 
 - Backtest LP simulation against real-data
 - Distribute LP strategy simulation with CUDA. 
-- Make the simulations Gas fees aware.
+- Make the simulations Gas fee aware.
 
 
 Non-Priority:
