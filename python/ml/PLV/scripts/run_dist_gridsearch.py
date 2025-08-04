@@ -1,8 +1,25 @@
+"""
+run_dist_gridsearch.py
+
+Distributed grid search script for hyperparameter optimization of Uniswap V3 ML models.
+
+High-level steps:
+1. Parse command-line arguments for grid search parameters and data configuration.
+2. Generate all hyperparameter combinations and distribute across available GPUs.
+3. For each hyperparameter combination:
+   a. Pretrain model on multiple pools using per-pool scaling (like pretraining script)
+   b. Evaluate model on pretraining validation data to get grid search loss
+4. Save grid search results for each combination to individual JSON files.
+5. Results can be collected later to find the best hyperparameter combination.
+
+Note: This script uses the pretraining validation loss as the optimization metric, which is
+efficient and provides good hyperparameter selection across diverse pool data without
+requiring individual pool-specific finetuning for each grid search combination.
+"""
+
 import os
 import argparse
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader
 from random import shuffle
 import random
@@ -41,8 +58,6 @@ def main(args):
     shuffle(pool_addresses)
     N = args.n_pools
     pool_addresses = pool_addresses[:N]
-    if args.main_pool_address not in pool_addresses:
-        pool_addresses.append(args.main_pool_address)
 
     n_lags_grid = [int(x) for x in args.n_lags_list.split(',')]
     batch_size_grid = [int(x) for x in args.batch_size_list.split(',')]
@@ -77,6 +92,7 @@ def main(args):
         model_kwargs["num_layers"] = param_dict["num_layers"]
         model_kwargs["dropout"] = param_dict["dropout"]
 
+        # Pretraining with per-pool scaling (like pretraining script)
         train_dataset = LPsDataset(
             hdf5_path=hdf5_path,
             pool_addresses=pool_addresses,
@@ -84,7 +100,8 @@ def main(args):
             target=target,
             n_lags=n_lags,
             split='train',
-            split_dates=split_dates
+            split_dates=split_dates,
+            num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4))
         )
         val_dataset = LPsDataset(
             hdf5_path=hdf5_path,
@@ -93,7 +110,8 @@ def main(args):
             target=target,
             n_lags=n_lags,
             split='val',
-            split_dates=split_dates
+            split_dates=split_dates,
+            num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4))
         )
         print(f"Number of training samples: {len(train_dataset)}")
         print(f"Number of validation samples: {len(val_dataset)}")
@@ -112,57 +130,13 @@ def main(args):
             early_stopping_patience=20
         )
         print('Model training complete.')
-        # Finetuning on main pool
-        finetune_dataset = LPsDataset(
-            hdf5_path=hdf5_path,
-            pool_addresses=[args.main_pool_address],
-            features=features,
-            target=target,
-            n_lags=n_lags,
-            split='train',
-            split_dates=split_dates
-        )
-        finetune_val_dataset = LPsDataset(
-            hdf5_path=hdf5_path,
-            pool_addresses=[args.main_pool_address],
-            features=features,
-            target=target,
-            n_lags=n_lags,
-            split='val',
-            split_dates=split_dates
-        )
-        if len(finetune_dataset) == 0 or len(finetune_val_dataset) == 0:
-            print("Skipping finetuning for this grid point: no data for main pool.")
-            continue
-        finetune_train_loader = DataLoader(
-            finetune_dataset, batch_size=batch_size, shuffle=True, num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)), pin_memory=True, drop_last=True)
-        finetune_val_loader = DataLoader(
-            finetune_val_dataset, batch_size=batch_size, shuffle=False, num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)), pin_memory=True, drop_last=False)
-        model.fit(
-            train_loader=finetune_train_loader,
-            epochs=epochs,
-            lr=lr,
-            verbose=1,
-            val_loader=finetune_val_loader,
-            early_stopping_patience=10
-        )
-        print("Finetuning complete.")
-        finetune_test_dataset = LPsDataset(
-            hdf5_path=hdf5_path,
-            pool_addresses=[args.main_pool_address],
-            features=features,
-            target=target,
-            n_lags=n_lags,
-            split='test',
-            split_dates=split_dates
-        )
-        finetune_test_loader = DataLoader(
-            finetune_test_dataset, batch_size=batch_size, shuffle=False, pin_memory=True, drop_last=False)
-        test_loss = model.evaluate(finetune_test_loader)
-        print(f"Custom loss on main pool testing: {test_loss:.8f}")
+        
+        # Evaluate on pretraining validation data for grid search results
+        val_loss = model.evaluate(val_loader)
+        print(f"Validation loss on pretraining pools: {val_loss:.8f}")
         result = {
             'params': param_dict,
-            'test_loss': test_loss
+            'val_loss': val_loss
         }
         # Save result to file
         out_path = os.path.join(model_dir, f"{args.model_name}_gpu{local_rank}_gridsearch_result_{i}.json")
@@ -192,7 +166,6 @@ def parse_args():
     parser.add_argument('--num_heads', type=int, default=2)
     parser.add_argument('--num_layers', type=int, default=2)
     parser.add_argument('--dropout', type=float, default=0.1)
-    parser.add_argument('--main_pool_address', type=str, required=True)
     parser.add_argument('--n_pools', type=int, required=False, default=1000)
     parser.add_argument('--features', type=str, required=True)
     parser.add_argument('--target', type=str, required=True)

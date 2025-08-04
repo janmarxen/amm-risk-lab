@@ -2,6 +2,7 @@ import abc
 import torch
 import torch.nn as nn
 import torch.distributed as dist
+import time
 
 class ZeroInflatedTSModule(nn.Module, abc.ABC):
     """
@@ -31,6 +32,7 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         patience_counter = 0
 
         for epoch in range(epochs):
+            epoch_start_time = time.time()
             self.train()
             total_loss = 0
             for X, y_cls, y_reg in train_loader:
@@ -63,8 +65,9 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
                 else:
                     patience_counter += 1
 
+                epoch_time = time.time() - epoch_start_time
                 if verbose and dist.get_rank() == 0:
-                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.12f}, Val Loss: {val_loss:.12f}")
+                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.12f}, Val Loss: {val_loss:.12f}, Time: {epoch_time:.2f}s")
 
                 if patience_counter >= early_stopping_patience:
                     if verbose and dist.get_rank() == 0:
@@ -73,8 +76,9 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
                         self.load_state_dict(best_state)
                     break
             else:
+                epoch_time = time.time() - epoch_start_time
                 if verbose and dist.get_rank() == 0 and (epoch % 5 == 0 or epoch == epochs - 1):
-                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.12f}")
+                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.12f}, Time: {epoch_time:.2f}s")
 
         # Restore best weights if early stopping was used
         if val_loader is not None and best_state is not None:
@@ -193,7 +197,7 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         """
         Evaluate the model on a validation DataLoader and return average loss.
         Args:
-            val_loader: Validation DataLoader
+            val_loader: Validation DataLoader (expects pre-scaled data)
         Returns:
             float: Average loss
         """
@@ -203,9 +207,9 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         n_samples = 0
         with torch.no_grad():
             for X, y_cls, y_reg in val_loader:
-                X = self.scale_X(X).to(device)
+                X = X.to(device)
                 y_cls = y_cls.to(device).unsqueeze(1)
-                y_reg = self.scale_y_reg(y_reg).to(device).unsqueeze(1)
+                y_reg = y_reg.to(device).unsqueeze(1)
                 cls_pred, reg_pred = self(X)
                 loss = self.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg)
                 total_loss += loss.item() * X.size(0)
@@ -217,22 +221,20 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         """
         Predict regression and classification outputs for input X.
         Args:
-            X: Input tensor or ndarray of shape (n_samples, n_lags, n_features)
+            X: Input tensor or ndarray of shape (n_samples, n_lags, n_features).
         Returns:
             tuple: (regression predictions, classification predictions)
         """
         device = next(self.parameters()).device
         self.eval()
         with torch.no_grad():
-            if isinstance(X, torch.Tensor):
-                X = X.numpy()
-            n_samples, n_lags, n_features = X.shape
-            X_scaled = self.feature_scaler.transform(X.reshape(-1, n_features)).reshape(n_samples, n_lags, n_features)
-            X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=device)
+            if not isinstance(X, torch.Tensor):
+                X_tensor = torch.tensor(X, dtype=torch.float32, device=device)
+            else:
+                X_tensor = X.to(device)
             cls_pred, reg_pred = self(X_tensor)
             cls_pred = (cls_pred.cpu().numpy().flatten() > 0.5).astype(int)
             reg_pred = reg_pred.cpu().numpy().flatten()
-            reg_pred = self.target_reg_scaler.inverse_transform(reg_pred.reshape(-1, 1)).flatten()
         return reg_pred, cls_pred
 
 class ZeroInflatedTransformer(ZeroInflatedTSModule):

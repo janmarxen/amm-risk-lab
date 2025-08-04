@@ -6,11 +6,18 @@ Distributed finetuning script for Uniswap V3 ML models using PyTorch DDP.
 High-level steps:
 1. Initialize distributed process group and set up device for each rank.
 2. Parse command-line arguments for model/data configuration and finetuning pool.
-3. Load pretrained model and associated scalers.
-4. Construct training and validation datasets for the finetuning pool.
-5. Wrap the model with DistributedDataParallel and finetune on the specified pool.
-6. Save the finetuned model and scalers (only on rank 0).
-7. Clean up and destroy the process group.
+3. Load pretrained model from checkpoint.
+4. Fit feature and target scalers on the finetuning pool's training data (on rank 0)
+   and broadcast to all ranks. These scalers are saved to enable consistent scaling
+   during the testing phase.
+5. Construct training and validation datasets for the finetuning pool using the
+   fitted scalers to ensure consistent scaling across train/val/test splits.
+6. Wrap the model with DistributedDataParallel and finetune on the specified pool.
+7. Save the finetuned model and scalers (only on rank 0).
+8. Clean up and destroy the process group.
+
+Note: Unlike pretraining where per-pool scaling is used, finetuning fits a single
+scaler per feature/target that is shared across train/val/test for consistency.
 """
 import os
 import torch
@@ -118,13 +125,6 @@ def main(args):
         target_reg_scaler=target_reg_scaler,
         verbose=1
     )
-    if rank == 0 and len(finetune_dataset) > 0:
-        X_post = finetune_dataset.X.cpu().numpy()
-        y_reg_post = finetune_dataset.y_reg.cpu().numpy()
-        print("[Finetune Dataset] Features mean:", X_post.mean(axis=(0, 1)))
-        print("[Finetune Dataset] Features std:", X_post.std(axis=(0, 1)))
-        print("[Finetune Dataset] Target mean:", y_reg_post.mean())
-        print("[Finetune Dataset] Target std:", y_reg_post.std())
     finetune_loader = DataLoader(finetune_dataset, batch_size=args.finetune_batch_size, shuffle=True)
     finetune_val_loader = DataLoader(finetune_val_dataset, batch_size=args.finetune_batch_size, shuffle=False)
     if len(finetune_dataset) == 0:

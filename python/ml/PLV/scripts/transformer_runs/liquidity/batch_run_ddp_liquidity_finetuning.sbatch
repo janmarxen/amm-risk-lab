@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=liquidity_finetuning
+#SBATCH --job-name=transformer_liquidity_finetuning
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4  
 #SBATCH --ntasks-per-node=1

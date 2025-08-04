@@ -32,23 +32,28 @@ def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
     if 'datetime' not in df.columns:
         df['datetime'] = pd.to_datetime(df['periodStartUnix'], unit='s')
     df = df.sort_values('datetime').reset_index(drop=True)
-    df['price'] = df['price'].astype(float)
-    df['liquidity'] = df['liquidity'].astype(float)
-    df['volumeUSD'] = df['volumeUSD'].astype(float)
+    df['price'] = df['price'].astype(np.float64)
+    df['liquidity'] = df['liquidity'].astype(np.float64)
+    df['volumeUSD'] = df['volumeUSD'].astype(np.float64)
     # Returns
-    df['price_return'] = df['price'].pct_change()
-    df['liquidity_return'] = df['liquidity'].pct_change()
-    df['volume_return'] = df['volumeUSD'].pct_change()
-    # Outlier removal
+    df['price_return'] = df['price'].pct_change().astype(np.float64)
+    df['liquidity_return'] = df['liquidity'].pct_change().astype(np.float64)
+    df['volume_return'] = df['volumeUSD'].pct_change().astype(np.float64)
+    # Outlier removal with improved precision
     def remove_outliers_iqr(series, k=3.0):
         nonzero = series[series != 0]
-        q1 = nonzero.quantile(0.25)
-        q3 = nonzero.quantile(0.75)
+        if len(nonzero) < 10:  # Need minimum samples for robust statistics
+            return series
+        # Use more precise percentile calculation
+        q1 = nonzero.quantile(0.25, interpolation='linear')
+        q3 = nonzero.quantile(0.75, interpolation='linear')
         iqr = q3 - q1
         lower = q1 - k * iqr
         upper = q3 + k * iqr
-        filtered = series.where((series >= lower) & (series <= upper))
-        filtered = filtered.interpolate(method='linear', limit_direction='both')
+        # Use more conservative replacement strategy
+        filtered = series.where((series >= lower) & (series <= upper), np.nan)
+        # Use forward-fill then backward-fill for better continuity
+        filtered = filtered.fillna(method='ffill').fillna(method='bfill')
         return filtered
     # Apply to desired columns
     for col in ['price_return', 'liquidity_return', 'volume_return']:
@@ -573,7 +578,7 @@ class LPsDataset(Dataset):
             df = df.dropna(subset=features + [target])
             if df.empty:
                 return [], [], []
-            # Scale features and target
+            # Scale features and target independently per pool
             X_feats = df[features].values
             y_target = df[target].values.reshape(-1, 1)
             # Ensure no non-finite values in target
@@ -586,14 +591,19 @@ class LPsDataset(Dataset):
                 if verbose:
                     print(f"[{addr}] Skipping due to bad feature values: {X_feats[~np.isfinite(X_feats)]}")
                 return [], [], []
-            # Fit scalers if they are not None
-            if self.feature_scaler is not None and self.target_reg_scaler is not None:
-                # Use the scalers to transform the data
+
+            # Use passed-in scalers if provided, else fit per-pool
+            if self.feature_scaler is not None:
                 X_feats_scaled = self.feature_scaler.transform(X_feats)
+            else:
+                feature_scaler = StandardScaler()
+                X_feats_scaled = feature_scaler.fit_transform(X_feats)
+
+            if self.target_reg_scaler is not None:
                 y_target_scaled = self.target_reg_scaler.transform(y_target).flatten()
             else:
-                X_feats_scaled = X_feats
-                y_target_scaled = y_target.flatten()
+                target_scaler = StandardScaler()
+                y_target_scaled = target_scaler.fit_transform(y_target).flatten()
 
             df.loc[:, features] = X_feats_scaled
             df.loc[:, target] = y_target_scaled

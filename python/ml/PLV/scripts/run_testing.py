@@ -1,3 +1,25 @@
+"""
+run_testing.py
+
+Testing script for evaluating finetuned Uniswap V3 ML models on test data.
+
+High-level steps:
+1. Parse command-line arguments for model configuration and test pool.
+2. Load model architecture and configuration from saved JSON file.
+3. Load the fitted scalers that were saved during finetuning to ensure
+   consistent scaling between training and testing phases.
+4. Construct test dataset for the specified pool using the loaded scalers
+   to maintain scaling consistency and prevent data leakage.
+5. Load the finetuned model from checkpoint and set to evaluation mode.
+6. Generate predictions on the test set using the finetuned model.
+7. Calculate model performance metrics including custom zero-inflated loss.
+8. Compare against naive persistence baseline for performance evaluation.
+9. Generate and save visualization plots of actual vs predicted values.
+
+Note: This script loads scalers fitted during finetuning to ensure consistent
+scaling across train/val/test splits and prevent any data leakage during evaluation.
+"""
+
 import os
 import torch
 import numpy as np
@@ -82,15 +104,6 @@ def main(args):
     if len(test_dataset) == 0:
         print("No test data available.")
         return
-        # Compare scaler stats with test data
-    print("Feature scaler mean:", feature_scaler.mean_)
-    print("Feature scaler std:", feature_scaler.scale_)
-    print("Test feature mean:", np.mean(test_dataset.X.numpy(), axis=(0, 1)))
-    print("Test feature std:", np.std(test_dataset.X.numpy(), axis=(0, 1)))
-    print("Target scaler mean:", target_reg_scaler.mean_)
-    print("Target scaler std:", target_reg_scaler.scale_)
-    print("Test target mean:", np.mean(test_dataset.y_reg.numpy()))
-    print("Test target std:", np.std(test_dataset.y_reg.numpy()))
     # --- Load model ---
     print("Loading model...")
     input_size = len(features) + 1 # +1 for the target variable

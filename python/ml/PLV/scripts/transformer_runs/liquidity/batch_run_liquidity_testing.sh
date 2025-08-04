@@ -7,13 +7,15 @@ set -e
 
 ### Configuration ###
 POOL_ADDRESS="0xcbcdf9626bc03e24f779434178a73a0b4bad62ed"
+MODEL_NAME="transformer_finetuned_liquidity_1_${POOL_ADDRESS}"
+
 TRAIN_START="2023-01-01"
 TRAIN_END="2025-05-01"
 VAL_START="2025-05-02"
 VAL_END="2025-06-01"
 TEST_START="2025-06-02"
 TEST_END="2025-07-01"
-MODEL_NAME="transformer_finetuned_liquidity_1_${POOL_ADDRESS}"
+
 
 # Run testing script
 python python/ml/PLV/scripts/run_testing.py \

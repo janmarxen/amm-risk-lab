@@ -34,6 +34,7 @@ __pycache__/
 *.tmp
 
 python/ml/PLV/data/
+python/ml/PLV/models/
 
 *.err
 *.out

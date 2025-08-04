@@ -1,0 +1,14 @@
+{
+  "params": {
+    "n_lags": 7,
+    "batch_size": 1024,
+    "d_model": 4,
+    "num_heads": 2,
+    "num_layers": 1,
+    "dense_units": 16,
+    "dropout": 0.3,
+    "lr": 0.0005,
+    "epochs": 25
+  },
+  "val_loss": 0.956037526904288
+}

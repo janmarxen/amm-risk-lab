@@ -117,9 +117,9 @@ def fetch_pool_hourly_data(api_key, subgraph_id, pool_address, start_date, end_d
     if not df.empty:
         df['periodStartUnix'] = pd.to_datetime(df['periodStartUnix'], unit='s')
         df = df.rename(columns={"token0Price": "price"})
-        df['price'] = pd.to_numeric(df['price'], errors='coerce').astype(float)
-        df['volumeUSD'] = pd.to_numeric(df['volumeUSD'], errors='coerce').astype(float)
-        df['liquidity'] = pd.to_numeric(df['liquidity'], errors='coerce').astype(float)
+        df['price'] = pd.to_numeric(df['price'], errors='coerce').astype('float64')
+        df['volumeUSD'] = pd.to_numeric(df['volumeUSD'], errors='coerce').astype('float64')
+        df['liquidity'] = pd.to_numeric(df['liquidity'], errors='coerce').astype('float64')
     return df
 
 def fetch_pools_hourly_data_batched(api_key, subgraph_id, pool_addresses, start_date, end_date):
@@ -195,9 +195,9 @@ def fetch_pools_hourly_data_batched(api_key, subgraph_id, pool_addresses, start_
             if not df.empty:
                 df['periodStartUnix'] = pd.to_datetime(df['periodStartUnix'], unit='s')
                 df = df.rename(columns={"token0Price": "price"})
-                df['price'] = pd.to_numeric(df['price'], errors='coerce').astype(float)
-                df['volumeUSD'] = pd.to_numeric(df['volumeUSD'], errors='coerce').astype(float)
-                df['liquidity'] = pd.to_numeric(df['liquidity'], errors='coerce').astype(float)
+                df['price'] = pd.to_numeric(df['price'], errors='coerce').astype('float64')
+                df['volumeUSD'] = pd.to_numeric(df['volumeUSD'], errors='coerce').astype('float64')
+                df['liquidity'] = pd.to_numeric(df['liquidity'], errors='coerce').astype('float64')
         pool_dict[addr] = df
 
     return pool_dict
@@ -278,9 +278,9 @@ def fetch_pools_hourly_data_batched_parallel(api_key, subgraph_id, pool_addresse
         if not df.empty:
             df['periodStartUnix'] = pd.to_datetime(df['periodStartUnix'], unit='s')
             df = df.rename(columns={"token0Price": "price"})
-            df['price'] = pd.to_numeric(df['price'], errors='coerce')
-            df['volumeUSD'] = pd.to_numeric(df['volumeUSD'], errors='coerce')
-            df['liquidity'] = pd.to_numeric(df['liquidity'], errors='coerce')
+            df['price'] = pd.to_numeric(df['price'], errors='coerce').astype('float64')
+            df['volumeUSD'] = pd.to_numeric(df['volumeUSD'], errors='coerce').astype('float64')
+            df['liquidity'] = pd.to_numeric(df['liquidity'], errors='coerce').astype('float64')
         pool_dict[addr] = df
 
     return pool_dict

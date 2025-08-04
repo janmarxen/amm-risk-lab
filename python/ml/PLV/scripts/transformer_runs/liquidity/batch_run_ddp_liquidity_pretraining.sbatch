@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=transformer_liquidity_pretraining
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4  
+#SBATCH --gres=gpu:2  
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
@@ -14,7 +14,7 @@
 
 # Get number of cpu per task
 export SRUN_CPUS_PER_TASK="$SLURM_CPUS_PER_TASK"
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0,1
 
 # Extracts the first hostname from the list of allocated nodes to use as the master address.
 MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
@@ -29,6 +29,10 @@ source /p/project1/training2529/marxen1/amm-risk-lab/envs/jureca0/activate.sh
 
 # Set the PYTHONPATH to include the project directory
 export PYTHONPATH=/p/project1/training2529/marxen1/amm-risk-lab:$PYTHONPATH
+
+export TORCH_SHOW_CPP_STACKTRACES=1
+export CUDA_LAUNCH_BLOCKING=0
+
 set -e
 
 ### Configuration ###
@@ -36,12 +40,12 @@ API_KEY="d1762c97d76a973e078c5536742bd237"
 SUBGRAPH_ID="5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV"
 
 MODEL_NAME="transformer_liquidity_pretrained_1"
-N_LAGS=12
-BATCH_SIZE=1024
-D_MODEL=16
+N_LAGS=10
+BATCH_SIZE=2048
+D_MODEL=8
 NUM_HEADS=2
 NUM_LAYERS=1
-DENSE_UNITS=32
+DENSE_UNITS=16
 DROPOUT=0.2
 LR=0.001
 EPOCHS=100
@@ -57,8 +61,8 @@ EPOCHS=100
 # LR=0.001
 # EPOCHS=100
 
-N_POOLS=500
-# N_POOLS=10000
+# N_POOLS=500
+N_POOLS=10000
 FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,\
 liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,\
 price_ma_3h,price_ma_6h,price_ma_24h,\

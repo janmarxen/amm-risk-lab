@@ -7,7 +7,7 @@ set -e
 ### Configuration ###
 API_KEY="d1762c97d76a973e078c5536742bd237"
 SUBGRAPH_ID="5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV"
-N_POOLS=200
+N_POOLS=1000
 MODEL_NAME="transformer_model_gs"
 FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,price_ma_3h,price_ma_6h,price_ma_24h,liquidity_ma_3h,liquidity_ma_6h,liquidity_ma_24h,hour,day_of_week,month,season"
 TARGET="liquidity_return"
@@ -20,15 +20,15 @@ TEST_END="2025-07-01"
 MAIN_POOL_ADDRESS="0xcbcdf9626bc03e24f779434178a73a0b4bad62ed"
 
 # Grid search parameters (comma-separated lists)
-N_LAGS_LIST="7,14"
-BATCH_SIZE_LIST="32,64"
-D_MODEL_LIST="32,64"
+N_LAGS_LIST="7,10,14"
+BATCH_SIZE_LIST="1024"
+D_MODEL_LIST="4,8,16"
 NUM_HEADS_LIST="2,4"
-NUM_LAYERS_LIST="2,4"
-DENSE_UNITS_LIST="16,32"
-DROPOUT_LIST="0.1,0.2"
+NUM_LAYERS_LIST="1,2"
+DENSE_UNITS_LIST="8,16,32"
+DROPOUT_LIST="0.1,0.2,0.3"
 LR_LIST="0.001,0.0005"
-EPOCHS_LIST="50,100"
+EPOCHS_LIST="100"
 
 # Step 2: Grid search training
 python3 -m python.ml.PLV.scripts.run_gridsearch \
