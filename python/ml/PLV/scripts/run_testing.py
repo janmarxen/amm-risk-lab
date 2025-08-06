@@ -86,7 +86,8 @@ def main(args):
     }
     # --- Prepare test dataset ---
     # Load scalers
-    scaler_path = os.path.splitext(model_path)[0] + '_scalers.pkl'
+    # scaler_path = os.path.splitext(model_path)[0] + '_scalers.pkl'
+    scaler_path = 'python/ml/PLV/models/transformer_liquidity_finetuned_1_0xcbcdf9626bc03e24f779434178a73a0b4bad62ed_scalers.pkl'
     feature_scaler, target_reg_scaler = load_scalers(scaler_path)
     print("Preparing test dataset...")
     test_dataset = LPsDataset(
@@ -116,7 +117,16 @@ def main(args):
         dense_units=arch['dense_units'],
         dropout=arch['dropout']
     )
-    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+    
+    # Handle both finetuned and pretrained model formats
+    checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
+    if isinstance(checkpoint, dict) and 'model' in checkpoint:
+        # Pretrained model format (from save_full_model)
+        model.load_state_dict(checkpoint['model'])
+    else:
+        # Finetuned model format (from save0) - direct state_dict
+        model.load_state_dict(checkpoint)
+    
     model.eval()
     # --- Model predictions ---
     X = test_dataset.X

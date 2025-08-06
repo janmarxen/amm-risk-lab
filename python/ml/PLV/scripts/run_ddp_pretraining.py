@@ -33,7 +33,7 @@ from python.utils.distributed_utils import *
 def main(args):
     local_rank, rank, device = setup()
 
-    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data.h5")
+    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data_2.h5")
     model_dir = os.path.join("/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models")
     model_path = os.path.join(model_dir, f"{args.model_name}.pt")
 

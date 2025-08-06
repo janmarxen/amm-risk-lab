@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=transformer_liquidity_pretraining
-#SBATCH --nodes=1
-#SBATCH --gres=gpu:2  
+#SBATCH --nodes=2
+#SBATCH --gres=gpu:4 
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=02:00:00
+#SBATCH --time=01:00:00
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
 
@@ -14,7 +14,7 @@
 
 # Get number of cpu per task
 export SRUN_CPUS_PER_TASK="$SLURM_CPUS_PER_TASK"
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # Extracts the first hostname from the list of allocated nodes to use as the master address.
 MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
@@ -40,28 +40,16 @@ API_KEY="d1762c97d76a973e078c5536742bd237"
 SUBGRAPH_ID="5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV"
 
 MODEL_NAME="transformer_liquidity_pretrained_1"
-N_LAGS=10
-BATCH_SIZE=2048
-D_MODEL=8
-NUM_HEADS=2
-NUM_LAYERS=1
-DENSE_UNITS=16
-DROPOUT=0.2
-LR=0.001
-EPOCHS=100
+N_LAGS=5        # Much shorter sequences
+BATCH_SIZE=1024 
+D_MODEL=16      
+NUM_HEADS=2     
+NUM_LAYERS=1    
+DENSE_UNITS=32  
+DROPOUT=0.5     
+LR=0.001        
+EPOCHS=200        
 
-# MODEL_NAME="transformer_liquidity_pretrained_2"
-# N_LAGS=14
-# BATCH_SIZE=1024
-# D_MODEL=16
-# NUM_HEADS=2
-# NUM_LAYERS=1
-# DENSE_UNITS=48
-# DROPOUT=0.3
-# LR=0.001
-# EPOCHS=100
-
-# N_POOLS=500
 N_POOLS=10000
 FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,\
 liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,\

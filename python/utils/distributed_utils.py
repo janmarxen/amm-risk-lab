@@ -229,3 +229,25 @@ def save_model_arch0(model_path, n_lags, d_model, num_heads, num_layers, dense_u
         }
         with open(arch_path, 'w') as f:
             json.dump(arch_dict, f, indent=2)
+
+def save_gridsearch_result(result, output_file):
+    """
+    Atomically append a single grid search result to the results file with file locking.
+    Args:
+        result (dict): Grid search result containing params and val_loss
+        output_file (str): Path to the output JSONL file
+    """
+    import fcntl
+    
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    
+    with open(output_file, 'a') as f:
+        # Lock the file to prevent race conditions
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        
+        # Write the result as a single JSON line
+        json.dump(result, f)
+        f.write('\n')  # Newline separator
+        
+        # Unlock happens automatically when file closes

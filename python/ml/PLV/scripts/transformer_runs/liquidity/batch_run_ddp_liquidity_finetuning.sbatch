@@ -47,8 +47,8 @@ TEST_START="2025-06-02"
 TEST_END="2025-07-01"
 
 FINETUNE_POOL_ADDRESS="0xcbcdf9626bc03e24f779434178a73a0b4bad62ed"
-PRETRAINED_MODEL_NAME="transformer_pretrained_liquidity_1"
-FINETUNED_MODEL_NAME="transformer_finetuned_liquidity_1_${FINETUNE_POOL_ADDRESS}"
+PRETRAINED_MODEL_NAME="transformer_liquidity_pretrained_2"
+FINETUNED_MODEL_NAME="transformer_liquidity_finetuned_2_${FINETUNE_POOL_ADDRESS}"
 
 # Launch distributed finetuning job
 srun --cpu_bind=none bash -c "torchrun_jsc \

@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=gridsearch
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4         # 1 task per GPU
 #SBATCH --gres=gpu:4               
 #SBATCH --cpus-per-task=32
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 LOG_DIR=/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_logs
@@ -24,7 +24,7 @@ set -e
 
 # Create output directories
 mkdir -p /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_logs
-mkdir -p /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_results
+# Note: gs_results directory no longer needed - using single file in models/
 
 ### Configuration ###
 N_POOLS=1000
@@ -44,15 +44,15 @@ TEST_START="2025-06-02"
 TEST_END="2025-07-01"
 
 # Grid search hyperparameters
-N_LAGS_LIST="5,7,10"
+N_LAGS_LIST="3,5,8"
 BATCH_SIZE_LIST="1024"
-D_MODEL_LIST="4,8,16"
-NUM_HEADS_LIST="2,4"
-NUM_LAYERS_LIST="1,2"
-DENSE_UNITS_LIST="8,16,32"
-DROPOUT_LIST="0.1,0.2,0.3"
-LR_LIST="0.001,0.0005"
-EPOCHS_LIST="25"
+D_MODEL_LIST="16"
+NUM_HEADS_LIST="4"
+NUM_LAYERS_LIST="3"
+DENSE_UNITS_LIST="32"
+DROPOUT_LIST="0.3"
+LR_LIST="0.001"
+EPOCHS_LIST="40"
 
 # Launch one Python process per task (per GPU)
 srun --cpu_bind=none \
@@ -77,5 +77,5 @@ srun --cpu_bind=none \
     --model_name $MODEL_NAME \
     --n_pools $N_POOLS \
     --features "$FEATURES" \
-    --target "$TARGET" \
-    --result_dir /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_results
+    --target "$TARGET"
+    # Note: Removed --result_dir since we're using the default models directory

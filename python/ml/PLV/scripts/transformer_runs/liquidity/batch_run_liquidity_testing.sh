@@ -7,7 +7,8 @@ set -e
 
 ### Configuration ###
 POOL_ADDRESS="0xcbcdf9626bc03e24f779434178a73a0b4bad62ed"
-MODEL_NAME="transformer_finetuned_liquidity_1_${POOL_ADDRESS}"
+# MODEL_NAME="transformer_liquidity_finetuned_1_${POOL_ADDRESS}"
+MODEL_NAME="transformer_liquidity_pretrained_1"
 
 TRAIN_START="2023-01-01"
 TRAIN_END="2025-05-01"

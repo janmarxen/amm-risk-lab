@@ -43,7 +43,7 @@ def main(args):
     finetune_pool_address = args.finetune_pool_address
     pretrained_model_name = args.pretrained_model_name
     finetuned_model_name = args.finetuned_model_name
-    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data.h5")
+    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data_2.h5")
     model_path = os.path.join("python/ml/PLV/models", f"{pretrained_model_name}.pt")
     finetuned_model_path = os.path.join("python/ml/PLV/models", f"{finetuned_model_name}.pt")
 

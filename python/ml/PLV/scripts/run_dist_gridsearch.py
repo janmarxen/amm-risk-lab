@@ -26,6 +26,7 @@ import random
 import sys
 from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
 from python.ml.PLV.model import ZeroInflatedLSTM, ZeroInflatedTransformer
+from python.utils.distributed_utils import save_gridsearch_result
 import itertools
 import json
 
@@ -135,14 +136,16 @@ def main(args):
         val_loss = model.evaluate(val_loader)
         print(f"Validation loss on pretraining pools: {val_loss:.8f}")
         result = {
+            'combination_id': i,
+            'gpu_rank': local_rank,
             'params': param_dict,
             'val_loss': val_loss
         }
-        # Save result to file
-        out_path = os.path.join(model_dir, f"{args.model_name}_gpu{local_rank}_gridsearch_result_{i}.json")
-        with open(out_path, 'w') as f:
-            json.dump(result, f, indent=2)
-        print(f"Grid search result written to {out_path}")
+        
+        # Write to single results file
+        results_file = os.path.join(model_dir, f"{args.model_name}_gridsearch_results.jsonl")
+        save_gridsearch_result(result, results_file)
+        print(f"Grid search result written to {results_file}")
 
 def parse_args():
     parser = argparse.ArgumentParser()

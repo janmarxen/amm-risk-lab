@@ -113,50 +113,110 @@ def dropna(df: pd.DataFrame, features: List[str], target_col: str) -> pd.DataFra
     mask = df[features + [target_col]].notnull().all(axis=1)
     return df.loc[mask].reset_index(drop=True)
 
+# def get_X_y(df: pd.DataFrame, features: List[str], target_col: str, n_lags: int) -> Tuple[list, list, list]:
+#     """
+#     Convert a DataFrame to supervised learning arrays for ZeroInflated LSTM/Transformer:
+#     - X: lagged feature windows + target lags
+#     - y_cls: classification label (1 if target == 0, else 0)
+#     - y_reg: regression target
+
+#     Faster by leveraging NumPy vectorization.
+#     """
+#     # Drop rows with missing/infinite values first
+#     df = df.copy()
+#     df = df.replace([np.inf, -np.inf], np.nan)
+#     df = df.dropna(subset=features + [target_col])
+
+#     data_feats = df[features].to_numpy()
+#     data_target = df[target_col].to_numpy()
+
+#     T = len(df)
+    
+#     if T < n_lags + 1:  # Need at least n_lags+1 points for this alignment
+#         return [], [], []
+    
+#     # Use sliding window for features, INCLUDING present timestep
+#     feats_window = np.lib.stride_tricks.sliding_window_view(data_feats, (n_lags, data_feats.shape[1]))
+#     feats_window = feats_window[:, 0, :, :]  # shape: (T - n_lags + 1, n_lags, n_features)
+
+#     # Use sliding window for target lags, EXCLUDING present timestep (only past values)
+#     target_lags_past = np.lib.stride_tricks.sliding_window_view(data_target, n_lags-1)
+#     # shape: (T - n_lags + 2, n_lags-1)
+    
+#     # Get FUTURE target values (y) - predict t+1 using features up to t
+#     y = data_target[n_lags:]  # Predict target at t+1, using features from [t-n_lags+1, ..., t]
+    
+#     # Pad target lags to match n_lags sequence length expected by model
+#     target_lags_expanded = target_lags_past.reshape(target_lags_past.shape[0], n_lags-1, 1)
+#     # Pad with zeros for the "missing" present timestep to maintain model input shape
+#     zero_pad = np.zeros((target_lags_expanded.shape[0], 1, 1))
+#     target_lags_padded = np.concatenate([target_lags_expanded, zero_pad], axis=1)  # shape: (N, n_lags, 1)
+
+#     # Align arrays: target_lags_past starts 1 step later than feats_window
+#     # feats_window: indices [0, 1, 2, ..., T-n_lags] -> features for times [0:n_lags, 1:n_lags+1, ..., T-n_lags:T]
+#     # target_lags_past: indices [0, 1, 2, ..., T-n_lags+1] -> target lags for times [0:n_lags-1, 1:n_lags, ..., T-n_lags+1:T-1]
+#     # y: indices [0, 1, 2, ..., T-n_lags] -> targets for times [n_lags, n_lags+1, ..., T-1]
+    
+#     # Cut arrays to same final length
+#     min_len = min(len(feats_window), len(target_lags_padded), len(y))
+#     feats_window = feats_window[:min_len]  # Take first min_len samples
+#     target_lags_padded = target_lags_padded[1:min_len+1]  # Shift by 1 to align properly  
+#     y = y[:min_len]
+
+#     # Concatenate features and target lags  
+#     X = np.concatenate([feats_window, target_lags_padded], axis=2)  # shape: (N, n_lags, f+1)
+
+#     # Filter finite rows
+#     mask = np.isfinite(X).all(axis=(1, 2)) & np.isfinite(y)
+#     X = X[mask]
+#     y_reg = y[mask]
+#     y_cls = (y_reg == 0).astype(float)
+
+#     return X.tolist(), y_cls.tolist(), y_reg.tolist()
+
 def get_X_y(df: pd.DataFrame, features: List[str], target_col: str, n_lags: int) -> Tuple[list, list, list]:
     """
     Convert a DataFrame to supervised learning arrays for ZeroInflated LSTM/Transformer:
-    - X: lagged feature windows + target lags
-    - y_cls: classification label (1 if target == 0, else 0)
-    - y_reg: regression target
-
-    Faster by leveraging NumPy vectorization.
+    - X: lagged features (ending at t) + target lags (ending at t-1)
+    - y_cls: classification label (1 if target[t] == 0, else 0)
+    - y_reg: regression target (at time t)
+    
+    Features at time t are valid - they don't leak information about target[t].
     """
-    # Drop rows with missing/infinite values first
+
     df = df.copy()
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna(subset=features + [target_col])
 
     data_feats = df[features].to_numpy()
     data_target = df[target_col].to_numpy()
-
     T = len(df)
-    if T < n_lags:
+
+    if T < n_lags + 1:
         return [], [], []
 
-    # Use sliding window for features (present included)
+    # Feature window: t - n_lags + 1 to t (length = n_lags, INCLUDE present)
     feats_window = np.lib.stride_tricks.sliding_window_view(data_feats, (n_lags, data_feats.shape[1]))
-    feats_window = feats_window[:, 0, :, :]  # shape: (T - n_lags + 1, n_lags, n_features)
+    feats_window = feats_window[:, 0, :, :]  # shape: (T - n_lags + 1, n_lags, num_features)
 
-    # Use sliding window for target lags (present included)
-    target_lags = np.lib.stride_tricks.sliding_window_view(data_target, n_lags)
-    # shape: (T - n_lags + 1, n_lags)
+    # Target lag window: t - n_lags to t - 1 (length = n_lags, EXCLUDE present)
+    target_lags = np.lib.stride_tricks.sliding_window_view(data_target, n_lags + 1)
+    target_lags = target_lags[:, :-1]  # Remove value at t
+    target_lags = target_lags[:, :, np.newaxis]  # shape: (N, n_lags, 1)
 
-    # Get present target values (y) -- last value in each window
-    y = target_lags[:, -1]
-    # Use all n_lags values for target lags
-    target_lags_expanded = target_lags.reshape(target_lags.shape[0], n_lags, 1)
+    # Target at time t
+    y = data_target[n_lags:]
 
-    # Cut both arrays to same final length
-    min_len = min(len(feats_window), len(target_lags_expanded))
+    # Match lengths
+    min_len = min(len(feats_window), len(target_lags), len(y))
     feats_window = feats_window[-min_len:]
-    target_lags_expanded = target_lags_expanded[-min_len:]
+    target_lags = target_lags[-min_len:]
     y = y[-min_len:]
 
     # Concatenate features and target lags
-    X = np.concatenate([feats_window, target_lags_expanded], axis=2)  # shape: (N, n_lags, f+1)
+    X = np.concatenate([feats_window, target_lags], axis=2)  # shape: (N, n_lags, num_features + 1)
 
-    # Filter finite rows
+    # Filter valid
     mask = np.isfinite(X).all(axis=(1, 2)) & np.isfinite(y)
     X = X[mask]
     y_reg = y[mask]
@@ -417,7 +477,7 @@ def make_lps_dataset_from_pool_dict(
                 self.y_cls = torch.tensor(self.y_cls, dtype=torch.float32)
                 self.y_reg = torch.tensor(self.y_reg, dtype=torch.float32)
             else:
-                self.X = torch.empty((0, n_lags, len(features)), dtype=torch.float32)
+                self.X = torch.empty((0, n_lags, len(features) + 1), dtype=torch.float32)  # +1 for target lag dimension
                 self.y_cls = torch.empty((0,), dtype=torch.float32)
                 self.y_reg = torch.empty((0,), dtype=torch.float32)
         def __len__(self):
@@ -548,7 +608,6 @@ class LPsDataset(Dataset):
         self.split = split
         self.feature_scaler = feature_scaler
         self.target_reg_scaler = target_reg_scaler
-        scaler_lock = Lock()
         # Load the pools' data into memory
         data_by_pool = load_selected_pools_in_memory(hdf5_path, pool_addresses)
         if pool_addresses is None:
@@ -628,7 +687,7 @@ class LPsDataset(Dataset):
             self.y_cls = torch.tensor(np.array(self.y_cls), dtype=torch.float32)
             self.y_reg = torch.tensor(np.array(self.y_reg), dtype=torch.float32)
         else:
-            d = len(features) + n_lags - 1
+            d = len(features) + 1  # features + target lags (1 dimension)
             self.X = torch.empty((0, n_lags, d), dtype=torch.float32)
             self.y_cls = torch.empty((0,), dtype=torch.float32)
             self.y_reg = torch.empty((0,), dtype=torch.float32)

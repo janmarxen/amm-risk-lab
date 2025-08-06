@@ -47,7 +47,7 @@ def main():
     start_date = args.start_date
     end_date = args.end_date
     # hdf5_path = os.path.join("python/ml/PLV/data", "uniswap_pools_data.h5")
-    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data.h5")
+    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data_2.h5")
     min_rows = 50
     pool_tier = None  # 'LOW', 'MEDIUM', 'HIGH', or None for all
     hdf5_mode = 'w'  # 'w' = overwrite, 'a' = append, 'x' = fail if exists
