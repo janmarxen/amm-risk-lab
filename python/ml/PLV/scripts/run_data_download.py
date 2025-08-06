@@ -1,7 +1,9 @@
 """
 run_data_download.py
 
-Script to fetch all pool addresses from a Uniswap subgraph and download their data to HDF5 using fetch_and_save_pools.
+Script to fetch all pool addresses from a Uniswap subgraph and download their raw data to HDF5.
+This script saves raw data only without feature engineering. Use run_data_transformation.py 
+for applying feature engineering transformations to the downloaded data.
 
 Usage:
     python run_data_download.py --api_key <API_KEY> --subgraph_id <SUBGRAPH_ID> --start_date <YYYY-MM-DD> --end_date <YYYY-MM-DD> [--main_pool_address <ADDR>] [--n_pools <N>]
@@ -63,8 +65,9 @@ def main():
     if args.main_pool_address and args.main_pool_address not in pool_addresses:
         pool_addresses.append(args.main_pool_address)
 
-    # ---- Download and save pool data ----
-    print(f"Downloading pool data and saving to {hdf5_path} ...")
+    # ---- Download and save raw pool data ----
+    print(f"Downloading raw pool data and saving to {hdf5_path} ...")
+    # Note: This saves raw data only. Use run_data_transformation.py for feature engineering.
     # Determine number of workers (CPUs/threads)
     num_workers = int(os.environ.get("SLURM_CPUS_ON_NODE", os.cpu_count()))
     print(f"Using max_workers={num_workers} for parallel fetching.")

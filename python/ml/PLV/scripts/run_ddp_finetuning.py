@@ -52,7 +52,7 @@ def main(args):
     with open(arch_path, 'r') as f:
         arch = json.load(f)
     features = arch['features']
-    target = arch['target']
+    targets = arch['targets']  # Multi-task targets
     
     split_dates = {
         'train_start': args.train_start,
@@ -64,7 +64,7 @@ def main(args):
     }
     # --- Load model ---
     print0("Loading model...")
-    input_size = len(features) + 1 # +1 for the target variable
+    input_size = len(features) + len(targets)  # features + target lags (2 targets)
     model = ZeroInflatedTransformer(
         input_size=input_size,
         n_lags=arch['n_lags'],
@@ -81,11 +81,11 @@ def main(args):
     # Fit scalers on rank 0
     print0("Fitting scalers on rank 0...")
     if rank == 0:
-        feature_scaler, target_reg_scaler = fit_scalers(
+        feature_scaler, target_reg_scalers = fit_scalers(
             hdf5_path=hdf5_path,
             pool_addresses=[finetune_pool_address],
             features=features,
-            target=target,
+            targets=targets,
             split_dates=split_dates,
             verbose=0,
             num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)),
@@ -93,11 +93,11 @@ def main(args):
         )
     else:
         feature_scaler = StandardScaler()
-        target_reg_scaler = StandardScaler()
+        target_reg_scalers = [StandardScaler(), StandardScaler()]
     # Broadcast fitted scalers from rank 0 to all ranks
-    scaler_list = [feature_scaler, target_reg_scaler]
+    scaler_list = [feature_scaler, target_reg_scalers]
     dist.broadcast_object_list(scaler_list, src=0)
-    feature_scaler, target_reg_scaler = scaler_list
+    feature_scaler, target_reg_scalers = scaler_list
     print0("Scalers loaded and broadcasted to all ranks.")
     # --- Model finetuning ---
     print0("Finetuning model on test pool on training+validation dates...")
@@ -105,24 +105,24 @@ def main(args):
         hdf5_path=hdf5_path,
         pool_addresses=[finetune_pool_address],
         features=features,
-        target=target,
+        targets=targets,
         n_lags=arch['n_lags'],
         split='train',
         split_dates=split_dates,
         feature_scaler=feature_scaler,
-        target_reg_scaler=target_reg_scaler,
+        target_reg_scalers=target_reg_scalers,
         verbose=1
     )
     finetune_val_dataset = LPsDataset(
         hdf5_path=hdf5_path,
         pool_addresses=[finetune_pool_address],
         features=features,
-        target=target,
+        targets=targets,
         n_lags=arch['n_lags'],
         split='val',
         split_dates=split_dates,
         feature_scaler=feature_scaler,
-        target_reg_scaler=target_reg_scaler,
+        target_reg_scalers=target_reg_scalers,
         verbose=1
     )
     finetune_loader = DataLoader(finetune_dataset, batch_size=args.finetune_batch_size, shuffle=True)
@@ -147,7 +147,7 @@ def main(args):
             finetuned_model_path,
             **arch
         )
-        save_scalers0(feature_scaler, target_reg_scaler, os.path.splitext(finetuned_model_path)[0] + '_scalers.pkl')
+        save_scalers0(feature_scaler, target_reg_scalers, os.path.splitext(finetuned_model_path)[0] + '_scalers.pkl')
         print0("Finetuning complete.")
         destroy_process_group()
 

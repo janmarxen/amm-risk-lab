@@ -40,10 +40,13 @@ def main(args):
     else:
         print("[run_gridsearch.py] ERROR: --features argument must be specified.")
         sys.exit(1)
-    if args.target is not None:
-        target = args.target
+    if args.targets is not None:
+        targets = [t.strip() for t in args.targets.split(',')]
+        if len(targets) != 2:
+            print("[run_gridsearch.py] ERROR: Exactly 2 targets must be specified for multi-task model.")
+            sys.exit(1)
     else:
-        print("[run_gridsearch.py] ERROR: --target argument must be specified.")
+        print("[run_gridsearch.py] ERROR: --targets argument must be specified with exactly 2 targets.")
         sys.exit(1)
     split_dates = {
         'train_start': args.train_start,
@@ -87,7 +90,7 @@ def main(args):
         dense_units = param_dict["dense_units"]
         lr = param_dict["lr"]
         epochs = param_dict["epochs"]
-        model_kwargs = dict(input_size=len(features)+1, n_lags=n_lags, dense_units=dense_units)
+        model_kwargs = dict(input_size=len(features)*len(targets)+len(targets), n_lags=n_lags, dense_units=dense_units)
         model_kwargs["d_model"] = param_dict["d_model"]
         model_kwargs["num_heads"] = param_dict["num_heads"]
         model_kwargs["num_layers"] = param_dict["num_layers"]
@@ -98,7 +101,7 @@ def main(args):
             hdf5_path=hdf5_path,
             pool_addresses=pool_addresses,
             features=features,
-            target=target,
+            targets=targets,
             n_lags=n_lags,
             split='train',
             split_dates=split_dates,
@@ -108,7 +111,7 @@ def main(args):
             hdf5_path=hdf5_path,
             pool_addresses=pool_addresses,
             features=features,
-            target=target,
+            targets=targets,
             n_lags=n_lags,
             split='val',
             split_dates=split_dates,
@@ -171,7 +174,7 @@ def parse_args():
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--n_pools', type=int, required=False, default=1000)
     parser.add_argument('--features', type=str, required=True)
-    parser.add_argument('--target', type=str, required=True)
+    parser.add_argument('--targets', type=str, required=True)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--result_dir', type=str, required=False, default=None)
     return parser.parse_args()

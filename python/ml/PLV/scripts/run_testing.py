@@ -75,7 +75,7 @@ def main(args):
     with open(arch_path, 'r') as f:
         arch = json.load(f)
     features = arch['features']
-    target = arch['target']
+    targets = arch['targets']  # Multi-task targets
     split_dates = {
         'train_start': args.train_start,
         'train_end': args.train_end,
@@ -87,19 +87,19 @@ def main(args):
     # --- Prepare test dataset ---
     # Load scalers
     # scaler_path = os.path.splitext(model_path)[0] + '_scalers.pkl'
-    scaler_path = 'python/ml/PLV/models/transformer_liquidity_finetuned_1_0xcbcdf9626bc03e24f779434178a73a0b4bad62ed_scalers.pkl'
-    feature_scaler, target_reg_scaler = load_scalers(scaler_path)
+    scaler_path = 'python/ml/PLV/models/transformer_multi_task_finetuned_1_0xcbcdf9626bc03e24f779434178a73a0b4bad62ed_scalers.pkl'
+    feature_scaler, target_reg_scalers = load_scalers(scaler_path)
     print("Preparing test dataset...")
     test_dataset = LPsDataset(
         hdf5_path=hdf5_path,
         pool_addresses=[pool_address],
         features=features,
-        target=target,
+        targets=targets,
         n_lags=arch['n_lags'],
         split='test',
         split_dates=split_dates,
         feature_scaler=feature_scaler,
-        target_reg_scaler=target_reg_scaler,
+        target_reg_scalers=target_reg_scalers,
         verbose=1
     )
     if len(test_dataset) == 0:
@@ -107,7 +107,7 @@ def main(args):
         return
     # --- Load model ---
     print("Loading model...")
-    input_size = len(features) + 1 # +1 for the target variable
+    input_size = len(features) * len(targets) + len(targets)  # Multi-task input size
     model = ZeroInflatedTransformer(
         input_size=input_size,
         n_lags=arch['n_lags'],
@@ -130,41 +130,59 @@ def main(args):
     model.eval()
     # --- Model predictions ---
     X = test_dataset.X
-    y_cls = test_dataset.y_cls
-    y_reg = test_dataset.y_reg
-    print("Unique y_cls in test set:", np.unique(y_cls.numpy(), return_counts=True))
-    y_reg_pred, y_cls_pred = model.predict(X)
-    # Print number of zero class predictions
-    n_zero_pred = np.sum(y_cls_pred == 1)
-    n_total = len(y_cls_pred)
-    print(f"Zero class predictions: {n_zero_pred} out of {n_total} ({n_zero_pred/n_total:.2%})")
+    y_cls_1 = test_dataset.y_cls_1
+    y_reg_1 = test_dataset.y_reg_1
+    y_cls_2 = test_dataset.y_cls_2
+    y_reg_2 = test_dataset.y_reg_2
+    print("Unique y_cls_1 in test set:", np.unique(y_cls_1.numpy(), return_counts=True))
+    print("Unique y_cls_2 in test set:", np.unique(y_cls_2.numpy(), return_counts=True))
+    y_reg_pred_1, y_cls_pred_1, y_reg_pred_2, y_cls_pred_2 = model.predict(X)
+    # Print number of zero class predictions for both tasks
+    n_zero_pred_1 = np.sum(y_cls_pred_1 == 1)
+    n_zero_pred_2 = np.sum(y_cls_pred_2 == 1)
+    n_total = len(y_cls_pred_1)
+    print(f"Task 1 zero class predictions: {n_zero_pred_1} out of {n_total} ({n_zero_pred_1/n_total:.2%})")
+    print(f"Task 2 zero class predictions: {n_zero_pred_2} out of {n_total} ({n_zero_pred_2/n_total:.2%})")
 
     # --- Custom loss on test set ---
     print("Calculating custom loss on test set...")
     with torch.no_grad():
-        y_cls_tensor = y_cls.unsqueeze(1)
-        y_reg_tensor = y_reg.unsqueeze(1)
-        cls_pred, reg_pred = model(X)
-        test_loss = model.__class__.custom_zi_loss(cls_pred, reg_pred, y_cls_tensor, y_reg_tensor).item()
+        y_cls_tensor_1 = y_cls_1.unsqueeze(1)
+        y_reg_tensor_1 = y_reg_1.unsqueeze(1)
+        y_cls_tensor_2 = y_cls_2.unsqueeze(1)
+        y_reg_tensor_2 = y_reg_2.unsqueeze(1)
+        cls_pred_1, reg_pred_1, cls_pred_2, reg_pred_2 = model(X)
+        test_loss = model.__class__.custom_zi_loss(cls_pred_1, reg_pred_1, cls_pred_2, reg_pred_2, y_cls_tensor_1, y_reg_tensor_1, y_cls_tensor_2, y_reg_tensor_2).item()
     print(f"Model's test custom loss: {test_loss:.8f}")
     
     # --- Naive baseline ---
     print("Calculating naive baseline...")
-    y_reg_np = y_reg.numpy()
-    naive_pred = naive_predict(np.array(y_reg_np))
+    y_reg_np_1 = y_reg_1.numpy()
+    y_reg_np_2 = y_reg_2.numpy()
+    naive_pred_1 = naive_predict(np.array(y_reg_np_1))
+    naive_pred_2 = naive_predict(np.array(y_reg_np_2))
     # For custom loss, need to align shapes and mask
-    mask = ~np.isnan(naive_pred)
-    y_reg_tensor_naive = torch.tensor(naive_pred[mask], dtype=torch.float32)
-    y_cls_tensor_naive = y_cls[mask].unsqueeze(1)
-    y_reg_tensor_true = y_reg[mask]
+    mask = ~np.isnan(naive_pred_1) & ~np.isnan(naive_pred_2)
+    y_reg_tensor_naive_1 = torch.tensor(naive_pred_1[mask], dtype=torch.float32)
+    y_reg_tensor_naive_2 = torch.tensor(naive_pred_2[mask], dtype=torch.float32)
+    y_cls_tensor_naive_1 = y_cls_1[mask].unsqueeze(1)
+    y_cls_tensor_naive_2 = y_cls_2[mask].unsqueeze(1)
+    y_reg_tensor_true_1 = y_reg_1[mask]
+    y_reg_tensor_true_2 = y_reg_2[mask]
     # Naive loss: use true y_cls, naive y_reg
-    naive_loss = model.__class__.custom_zi_loss(y_cls_tensor_naive, y_reg_tensor_naive.unsqueeze(1), y_cls_tensor_naive, y_reg_tensor_true.unsqueeze(1)).item()
+    naive_loss = model.__class__.custom_zi_loss(y_cls_tensor_naive_1, y_reg_tensor_naive_1.unsqueeze(1), y_cls_tensor_naive_2, y_reg_tensor_naive_2.unsqueeze(1), y_cls_tensor_naive_1, y_reg_tensor_true_1.unsqueeze(1), y_cls_tensor_naive_2, y_reg_tensor_true_2.unsqueeze(1)).item()
     print(f"Naive baseline custom loss: {naive_loss:.8f}")
     # --- Plot ---
     print("Saving figures...")
-    y_reg_pred[y_cls_pred==1] = 0  # Set predicted liquidity return to 0 where cls_pred is 1
-    save_actual_vs_predicted(y_reg_np, y_reg_pred, title=f"Actual vs Predicted {model_name} (Test Set)", filename=f"actual_vs_predicted_{model_name}.png")
-    save_actual_vs_predicted(y_reg_np[mask], naive_pred[mask], title=f"Naive: Actual vs Predicted {model_name} (Test Set)", filename=f"naive_actual_vs_predicted_{model_name}.png")
+    # Task 1 plots
+    y_reg_pred_1[y_cls_pred_1==1] = 0  # Set predicted values to 0 where cls_pred is 1
+    save_actual_vs_predicted(y_reg_np_1, y_reg_pred_1, title=f"Actual vs Predicted {targets[0]} {model_name} (Test Set)", filename=f"actual_vs_predicted_{model_name}_{targets[0]}.png")
+    save_actual_vs_predicted(y_reg_np_1[mask], naive_pred_1[mask], title=f"Naive: Actual vs Predicted {targets[0]} {model_name} (Test Set)", filename=f"naive_actual_vs_predicted_{model_name}_{targets[0]}.png")
+    
+    # Task 2 plots
+    y_reg_pred_2[y_cls_pred_2==1] = 0  # Set predicted values to 0 where cls_pred is 1
+    save_actual_vs_predicted(y_reg_np_2, y_reg_pred_2, title=f"Actual vs Predicted {targets[1]} {model_name} (Test Set)", filename=f"actual_vs_predicted_{model_name}_{targets[1]}.png")
+    save_actual_vs_predicted(y_reg_np_2[mask], naive_pred_2[mask], title=f"Naive: Actual vs Predicted {targets[1]} {model_name} (Test Set)", filename=f"naive_actual_vs_predicted_{model_name}_{targets[1]}.png")
 
 
 def parse_args():

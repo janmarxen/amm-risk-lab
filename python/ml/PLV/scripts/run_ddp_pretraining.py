@@ -40,13 +40,19 @@ def main(args):
     if args.features is not None:
         features = [f.strip() for f in args.features.split(',')]
     else:
-        print0("[run_ddp_training.py] ERROR: --features argument must be specified.")
+        print0("[run_ddp_pretraining.py] ERROR: --features argument must be specified.")
         sys.exit(1)
-    if args.target is not None:
-        target = args.target
+    if args.targets is not None:
+        targets = [t.strip() for t in args.targets.split(',')]
     else:
-        print0("[run_ddp_training.py] ERROR: --target argument must be specified.")
+        print0("[run_ddp_pretraining.py] ERROR: --targets argument must be specified.")
         sys.exit(1)
+    
+    # Always use multi-task architecture with exactly 2 targets
+    if len(targets) != 2:
+        print0("[run_ddp_pretraining.py] ERROR: Must specify exactly 2 targets for multi-task architecture.")
+        sys.exit(1)
+    multi_task = True
     n_lags = args.n_lags
     batch_size = args.batch_size
     dense_units = args.dense_units
@@ -76,7 +82,7 @@ def main(args):
         hdf5_path=hdf5_path,
         pool_addresses=pool_addresses,
         features=features,
-        target=target,
+        targets=targets,
         n_lags=n_lags,
         split='train',
         split_dates=split_dates,
@@ -86,7 +92,7 @@ def main(args):
         hdf5_path=hdf5_path,
         pool_addresses=pool_addresses,
         features=features,
-        target=target,
+        targets=targets,
         n_lags=n_lags,
         split='val',
         split_dates=split_dates,
@@ -101,7 +107,9 @@ def main(args):
         train_dataset, batch_size=batch_size, sampler=train_sampler, num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)), pin_memory=True, drop_last=True)
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size, sampler=val_sampler, num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)), pin_memory=True, drop_last=False)
-    input_size = len(features) + 1
+    
+    # Calculate input size: features + target lags (2 targets)
+    input_size = len(features) + len(targets)
     model = ZeroInflatedTransformer(
         input_size=input_size,
         n_lags=n_lags,
@@ -135,7 +143,8 @@ def main(args):
         dense_units=dense_units,
         dropout=args.dropout,
         features=features,
-        target=target
+        targets=targets,
+        multi_task=True
     )
     destroy_process_group()
 
@@ -160,7 +169,7 @@ def parse_args():
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--n_pools', type=int, required=False, default=1000)
     parser.add_argument('--features', type=str, required=False, default=None, help='Comma-separated list of features')
-    parser.add_argument('--target', type=str, required=False, default=None, help='Target column name')
+    parser.add_argument('--targets', type=str, required=True, help='Comma-separated list of exactly 2 target column names')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     return parser.parse_args()
 

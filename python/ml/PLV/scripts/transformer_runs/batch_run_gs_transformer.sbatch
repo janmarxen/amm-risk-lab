@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=01:30:00
+#SBATCH --time=03:00:00
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 LOG_DIR=/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_logs
@@ -16,17 +16,27 @@ exec > "$LOG_DIR/job_${SLURM_JOB_ID}_task_${SLURM_PROCID}.out" 2> "$LOG_DIR/job_
 # Activate environment
 source /p/project1/training2529/marxen1/amm-risk-lab/envs/jureca0/activate.sh
 export PYTHONPATH=/p/project1/training2529/marxen1/amm-risk-lab:$PYTHONPATH
+
+export TORCH_SHOW_CPP_STACKTRACES=1
+export CUDA_LAUNCH_BLOCKING=0
+
 set -e
 
 # Create output directories
 mkdir -p /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_logs
-mkdir -p /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_results
+# Note: gs_results directory no longer needed - using single file in models/
 
 ### Configuration ###
-N_POOLS=2000
+N_POOLS=1000
 MODEL_NAME="transformer_model_gs"
-FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,volume_volatility_3h,volume_volatility_6h,volume_volatility_24h,price_ma_3h,price_ma_6h,price_ma_24h,volume_ma_3h,volume_ma_6h,volume_ma_24h,hour,day_of_week,month,season"
-TARGET="volume_return"
+FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,\
+liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,\
+volume_volatility_3h,volume_volatility_6h,volume_volatility_24h,\
+price_ma_3h,price_ma_6h,price_ma_24h,\
+liquidity_ma_3h,liquidity_ma_6h,liquidity_ma_24h,\
+hour,day_of_week,month,season"
+TARGETS="liquidity_return,volume_return"
+
 TRAIN_START="2023-01-01"
 TRAIN_END="2025-05-01"
 VAL_START="2025-05-02"
@@ -35,15 +45,15 @@ TEST_START="2025-06-02"
 TEST_END="2025-07-01"
 
 # Grid search hyperparameters
-N_LAGS_LIST="7,14"
-BATCH_SIZE_LIST="64"
-D_MODEL_LIST="32,64"
-NUM_HEADS_LIST="2,4"
-NUM_LAYERS_LIST="2,4"
-DENSE_UNITS_LIST="16,32"
-DROPOUT_LIST="0.1,0.2"
-LR_LIST="0.001,0.0005"
-EPOCHS_LIST="100"
+N_LAGS_LIST="3,5,8"
+BATCH_SIZE_LIST="1024"
+D_MODEL_LIST="16"
+NUM_HEADS_LIST="4"
+NUM_LAYERS_LIST="3"
+DENSE_UNITS_LIST="32"
+DROPOUT_LIST="0.3"
+LR_LIST="0.001"
+EPOCHS_LIST="40"
 
 # Launch one Python process per task (per GPU)
 srun --cpu_bind=none \
@@ -68,5 +78,5 @@ srun --cpu_bind=none \
     --model_name $MODEL_NAME \
     --n_pools $N_POOLS \
     --features "$FEATURES" \
-    --target "$TARGET" \
-    --result_dir /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_results
+    --target "$TARGET"
+    # Note: Removed --result_dir since we're using the default models directory

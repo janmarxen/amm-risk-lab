@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=transformer_liquidity_pretraining
+#SBATCH --job-name=transformer_pretraining
 #SBATCH --nodes=2
 #SBATCH --gres=gpu:4 
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=01:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
 
@@ -39,8 +39,8 @@ set -e
 API_KEY="d1762c97d76a973e078c5536742bd237"
 SUBGRAPH_ID="5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV"
 
-MODEL_NAME="transformer_liquidity_pretrained_1"
-N_LAGS=5        # Much shorter sequences
+MODEL_NAME="transformer_pretrained_2"
+N_LAGS=5       
 BATCH_SIZE=1024 
 D_MODEL=16      
 NUM_HEADS=2     
@@ -50,13 +50,14 @@ DROPOUT=0.5
 LR=0.001        
 EPOCHS=200        
 
-N_POOLS=10000
+N_POOLS=100
 FEATURES="price_return,price_volatility_3h,price_volatility_6h,price_volatility_24h,\
 liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,\
+volume_volatility_3h,volume_volatility_6h,volume_volatility_24h,\
 price_ma_3h,price_ma_6h,price_ma_24h,\
 liquidity_ma_3h,liquidity_ma_6h,liquidity_ma_24h,\
 hour,day_of_week,month,season"
-TARGET="liquidity_return"
+TARGETS="liquidity_return,volume_return"
 
 TRAIN_START="2023-01-01"
 TRAIN_END="2025-05-01"
@@ -92,5 +93,5 @@ srun --cpu_bind=none bash -c "torchrun_jsc \
     --model_name $MODEL_NAME \
     --n_pools $N_POOLS \
     --features "$FEATURES" \
-    --target "$TARGET" 
+    --targets "$TARGETS" 
 "

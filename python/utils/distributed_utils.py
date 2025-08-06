@@ -182,17 +182,17 @@ def atomic_print(*args, device=None, **kwargs):
     torch.distributed.barrier()
 
 
-def save_scalers0(feature_scaler, target_reg_scaler, path):
+def save_scalers0(feature_scaler, target_reg_scalers, path):
     """
     Save feature and target scalers to a file using pickle, only on rank 0.
     Args:
         feature_scaler: Fitted feature scaler (e.g., StandardScaler)
-        target_reg_scaler: Fitted target scaler (e.g., StandardScaler)
+        target_reg_scalers: List of 2 fitted target scalers (e.g., [StandardScaler(), StandardScaler()])
         path: Path to save the scalers (should end with .pkl)
     """
     if is_root_process():
         with open(path, 'wb') as f:
-            pickle.dump({'feature_scaler': feature_scaler, 'target_reg_scaler': target_reg_scaler}, f)
+            pickle.dump({'feature_scaler': feature_scaler, 'target_reg_scalers': target_reg_scalers}, f)
 
 def load_scalers(path):
     """
@@ -200,20 +200,20 @@ def load_scalers(path):
     Args:
         path: Path to the saved scalers (.pkl)
     Returns:
-        (feature_scaler, target_reg_scaler) 
+        (feature_scaler, target_reg_scalers) - scalers list contains 2 target scalers
     """
     with open(path, 'rb') as f:
         scalers = pickle.load(f)
-        return scalers['feature_scaler'], scalers['target_reg_scaler']
+        return scalers['feature_scaler'], scalers['target_reg_scalers']
     
-def save_model_arch0(model_path, n_lags, d_model, num_heads, num_layers, dense_units, dropout, features, target):
+def save_model_arch0(model_path, n_lags, d_model, num_heads, num_layers, dense_units, dropout, features, targets):
     """
     Save transformer model architecture as JSON, only on rank 0.
     Args:
         model_path (str): Path to the model .pt file (used as base for JSON filename)
         n_lags, d_model, num_heads, num_layers, dense_units, dropout: Transformer hyperparameters
         features (list): List of feature names
-        target (str): Target column name
+        targets (list): List of exactly 2 target column names
     """
     arch_path = os.path.splitext(model_path)[0] + '_arch.json'
     if is_root_process():
@@ -225,7 +225,7 @@ def save_model_arch0(model_path, n_lags, d_model, num_heads, num_layers, dense_u
             'dense_units': dense_units,
             'dropout': dropout,
             'features': features,
-            'target': target
+            'targets': targets
         }
         with open(arch_path, 'w') as f:
             json.dump(arch_dict, f, indent=2)

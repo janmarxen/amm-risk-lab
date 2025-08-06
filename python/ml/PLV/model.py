@@ -8,8 +8,7 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
     """
     Abstract base class for zero-inflated time series models.
     Provides common scaling, training, evaluation, and prediction utilities for time series models
-    with both classification and regression heads. Intended to be subclassed by specific architectures
-    such as LSTM and Transformer.
+    with both classification and regression heads. Multi-task architecture for 2 targets.
     """
 
     def fit_distributed(self, train_loader, epochs=20, lr=0.001, verbose=1, val_loader=None, early_stopping_patience=10, device=None):
@@ -35,14 +34,22 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
             epoch_start_time = time.time()
             self.train()
             total_loss = 0
-            for X, y_cls, y_reg in train_loader:
+            for batch in train_loader:
+                # Multi-task batch: (X, y_cls_1, y_reg_1, y_cls_2, y_reg_2)
+                X, y_cls_1, y_reg_1, y_cls_2, y_reg_2 = batch
                 X_tensor = X.to(device)
-                y_cls = y_cls.to(device).unsqueeze(1)
-                y_reg_tensor = y_reg.to(device).unsqueeze(1)
+                y_cls_1 = y_cls_1.to(device).unsqueeze(1)
+                y_reg_1 = y_reg_1.to(device).unsqueeze(1)
+                y_cls_2 = y_cls_2.to(device).unsqueeze(1)
+                y_reg_2 = y_reg_2.to(device).unsqueeze(1)
 
                 optimizer.zero_grad()
-                cls_pred, reg_pred = self(X_tensor)
-                loss = self.__class__.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg_tensor)
+                cls_pred_1, reg_pred_1, cls_pred_2, reg_pred_2 = self(X_tensor)
+                loss = self.__class__.custom_zi_loss(
+                    cls_pred_1, reg_pred_1, y_cls_1, y_reg_1,
+                    cls_pred_2, reg_pred_2, y_cls_2, y_reg_2
+                )
+                
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item() * X.size(0)
@@ -99,12 +106,21 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         total_loss = 0
         n_samples = 0
         with torch.no_grad():
-            for X, y_cls, y_reg in val_loader:
+            for batch in val_loader:
+                # Multi-task batch: (X, y_cls_1, y_reg_1, y_cls_2, y_reg_2)
+                X, y_cls_1, y_reg_1, y_cls_2, y_reg_2 = batch
                 X = X.to(device)
-                y_cls = y_cls.to(device).unsqueeze(1)
-                y_reg = y_reg.to(device).unsqueeze(1)
-                cls_pred, reg_pred = self(X)
-                loss = self.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg)
+                y_cls_1 = y_cls_1.to(device).unsqueeze(1)
+                y_reg_1 = y_reg_1.to(device).unsqueeze(1)
+                y_cls_2 = y_cls_2.to(device).unsqueeze(1)
+                y_reg_2 = y_reg_2.to(device).unsqueeze(1)
+                
+                cls_pred_1, reg_pred_1, cls_pred_2, reg_pred_2 = self(X)
+                loss = self.custom_zi_loss(
+                    cls_pred_1, reg_pred_1, y_cls_1, y_reg_1,
+                    cls_pred_2, reg_pred_2, y_cls_2, y_reg_2
+                )
+                
                 total_loss += loss.item() * X.size(0)
                 n_samples += X.size(0)
         total_loss_tensor = torch.tensor(total_loss, device=device)
@@ -137,13 +153,22 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         for epoch in range(epochs):
             self.train()
             total_loss = 0
-            for X, y_cls, y_reg in train_loader:
+            for batch in train_loader:
+                # Multi-task batch: (X, y_cls_1, y_reg_1, y_cls_2, y_reg_2)
+                X, y_cls_1, y_reg_1, y_cls_2, y_reg_2 = batch
                 X_tensor = X.to(device)
-                y_cls = y_cls.to(device).unsqueeze(1)
-                y_reg_tensor = y_reg.to(device).unsqueeze(1)
+                y_cls_1 = y_cls_1.to(device).unsqueeze(1)
+                y_reg_1 = y_reg_1.to(device).unsqueeze(1)
+                y_cls_2 = y_cls_2.to(device).unsqueeze(1)
+                y_reg_2 = y_reg_2.to(device).unsqueeze(1)
+
                 optimizer.zero_grad()
-                cls_pred, reg_pred = self(X_tensor)
-                loss = self.__class__.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg_tensor)
+                cls_pred_1, reg_pred_1, cls_pred_2, reg_pred_2 = self(X_tensor)
+                loss = self.__class__.custom_zi_loss(
+                    cls_pred_1, reg_pred_1, y_cls_1, y_reg_1,
+                    cls_pred_2, reg_pred_2, y_cls_2, y_reg_2
+                )
+                
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item() * X.size(0)
@@ -173,25 +198,47 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         return self
 
     @staticmethod
-    def custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg):
+    def custom_zi_loss(cls_pred_1, reg_pred_1, y_cls_1, y_reg_1, cls_pred_2, reg_pred_2, y_cls_2, y_reg_2, task_weights=None):
         """
-        Custom loss for zero-inflated time series models.
-        Combines binary cross-entropy for zero-class and masked MSE for regression.
+        Custom loss for zero-inflated time series models with multi-task support.
+        Combines binary cross-entropy for zero-class and masked MSE for regression for both tasks.
+        
         Args:
-            cls_pred: Classification predictions
-            reg_pred: Regression predictions
-            y_cls: True zero-class labels
-            y_reg: True regression targets
+            cls_pred_1: Classification predictions for task 1
+            reg_pred_1: Regression predictions for task 1  
+            y_cls_1: True zero-class labels for task 1
+            y_reg_1: True regression targets for task 1
+            cls_pred_2: Classification predictions for task 2
+            reg_pred_2: Regression predictions for task 2
+            y_cls_2: True zero-class labels for task 2
+            y_reg_2: True regression targets for task 2
+            task_weights: List of weights [w1, w2] for tasks (default: [0.5, 0.5])
         Returns:
             torch.Tensor: Combined loss
         """
-        bce = nn.BCELoss()(cls_pred, y_cls)
-        mask = (y_cls == 0).float()
-        if mask.sum() > 0:
-            mse = ((reg_pred.squeeze() - y_reg.squeeze()) ** 2 * mask).sum() / (mask.sum() + 1e-6)
+        if task_weights is None:
+            task_weights = [0.5, 0.5]
+        
+        # Task 1 loss
+        bce_1 = nn.BCELoss()(cls_pred_1, y_cls_1)
+        mask_1 = (y_cls_1 == 0).float()
+        if mask_1.sum() > 0:
+            mse_1 = ((reg_pred_1.squeeze() - y_reg_1.squeeze()) ** 2 * mask_1).sum() / (mask_1.sum() + 1e-6)
         else:
-            mse = torch.tensor(0.0, device=reg_pred.device)
-        return bce + mse
+            mse_1 = torch.tensor(0.0, device=reg_pred_1.device)
+        task_1_loss = bce_1 + mse_1
+        
+        # Task 2 loss
+        bce_2 = nn.BCELoss()(cls_pred_2, y_cls_2)
+        mask_2 = (y_cls_2 == 0).float()
+        if mask_2.sum() > 0:
+            mse_2 = ((reg_pred_2.squeeze() - y_reg_2.squeeze()) ** 2 * mask_2).sum() / (mask_2.sum() + 1e-6)
+        else:
+            mse_2 = torch.tensor(0.0, device=reg_pred_2.device)
+        task_2_loss = bce_2 + mse_2
+        
+        total_loss = task_weights[0] * task_1_loss + task_weights[1] * task_2_loss
+        return total_loss
 
     def evaluate(self, val_loader):
         """
@@ -206,12 +253,21 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         total_loss = 0
         n_samples = 0
         with torch.no_grad():
-            for X, y_cls, y_reg in val_loader:
+            for batch in val_loader:
+                # Multi-task batch: (X, y_cls_1, y_reg_1, y_cls_2, y_reg_2)
+                X, y_cls_1, y_reg_1, y_cls_2, y_reg_2 = batch
                 X = X.to(device)
-                y_cls = y_cls.to(device).unsqueeze(1)
-                y_reg = y_reg.to(device).unsqueeze(1)
-                cls_pred, reg_pred = self(X)
-                loss = self.custom_zi_loss(cls_pred, reg_pred, y_cls, y_reg)
+                y_cls_1 = y_cls_1.to(device).unsqueeze(1)
+                y_reg_1 = y_reg_1.to(device).unsqueeze(1)
+                y_cls_2 = y_cls_2.to(device).unsqueeze(1)
+                y_reg_2 = y_reg_2.to(device).unsqueeze(1)
+                
+                cls_pred_1, reg_pred_1, cls_pred_2, reg_pred_2 = self(X)
+                loss = self.custom_zi_loss(
+                    cls_pred_1, reg_pred_1, y_cls_1, y_reg_1,
+                    cls_pred_2, reg_pred_2, y_cls_2, y_reg_2
+                )
+                
                 total_loss += loss.item() * X.size(0)
                 n_samples += X.size(0)
         avg_loss = total_loss / n_samples if n_samples > 0 else float('inf')
@@ -219,11 +275,11 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
 
     def predict(self, X):
         """
-        Predict regression and classification outputs for input X.
+        Predict regression and classification outputs for input X for both tasks.
         Args:
             X: Input tensor or ndarray of shape (n_samples, n_lags, n_features).
         Returns:
-            tuple: (regression predictions, classification predictions)
+            tuple: (reg_pred_1, cls_pred_1, reg_pred_2, cls_pred_2) for both tasks
         """
         device = next(self.parameters()).device
         self.eval()
@@ -232,29 +288,22 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
                 X_tensor = torch.tensor(X, dtype=torch.float32, device=device)
             else:
                 X_tensor = X.to(device)
-            cls_pred, reg_pred = self(X_tensor)
-            cls_pred = (cls_pred.cpu().numpy().flatten() > 0.5).astype(int)
-            reg_pred = reg_pred.cpu().numpy().flatten()
-        return reg_pred, cls_pred
+            cls_pred_1, reg_pred_1, cls_pred_2, reg_pred_2 = self(X_tensor)
+            
+            # Convert to numpy and apply thresholds
+            cls_pred_1 = (cls_pred_1.cpu().numpy().flatten() > 0.5).astype(int)
+            reg_pred_1 = reg_pred_1.cpu().numpy().flatten()
+            cls_pred_2 = (cls_pred_2.cpu().numpy().flatten() > 0.5).astype(int)
+            reg_pred_2 = reg_pred_2.cpu().numpy().flatten()
+            
+        return reg_pred_1, cls_pred_1, reg_pred_2, cls_pred_2
 
 class ZeroInflatedTransformer(ZeroInflatedTSModule):
     """
-    Transformer-based zero-inflated time series model.
+    Transformer-based zero-inflated time series model for multi-task learning.
     Uses a transformer encoder to process sequential input data, with shared dense layers and separate
-    heads for classification (zero/non-zero) and regression (value prediction). Supports feature and target scaling.
-    Args:
-        input_size (int): Number of input features.
-        n_lags (int): Number of lag steps.
-        d_model (int): Transformer model dimension.
-        num_heads (int): Number of attention heads.
-        num_layers (int): Number of transformer layers.
-        dense_units (int): Number of units in shared dense layer.
-        dropout (float): Dropout rate.
-    """
-    """
-    Transformer-based zero-inflated time series model.
-    Uses a transformer encoder to process sequential input data, with shared dense layers and separate
-    heads for classification (zero/non-zero) and regression (value prediction). Supports feature and target scaling.
+    heads for classification (zero/non-zero) and regression (value prediction) for 2 tasks.
+    
     Args:
         input_size (int): Number of input features.
         n_lags (int): Number of lag steps.
@@ -269,14 +318,24 @@ class ZeroInflatedTransformer(ZeroInflatedTSModule):
         self.input_size = input_size
         self.n_lags = n_lags
         self.d_model = d_model
+        
+        # Shared layers
         self.pos_encoder = nn.Parameter(torch.zeros(1, n_lags, d_model))
         self.input_proj = nn.Linear(input_size, d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads, dim_feedforward=d_model*2, dropout=dropout, batch_first=True, norm_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.shared_dense = nn.Linear(d_model, dense_units)
-        self.classifier = nn.Linear(dense_units, 1)
-        self.regressor_dense = nn.Linear(dense_units, dense_units)
-        self.regressor = nn.Linear(dense_units, 1)
+        
+        # Task 1 heads
+        self.classifier_1 = nn.Linear(dense_units, 1)
+        self.regressor_dense_1 = nn.Linear(dense_units, dense_units)
+        self.regressor_1 = nn.Linear(dense_units, 1)
+        
+        # Task 2 heads
+        self.classifier_2 = nn.Linear(dense_units, 1)
+        self.regressor_dense_2 = nn.Linear(dense_units, dense_units)
+        self.regressor_2 = nn.Linear(dense_units, 1)
+        
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
@@ -285,41 +344,17 @@ class ZeroInflatedTransformer(ZeroInflatedTSModule):
         x = self.input_proj(x) + self.pos_encoder[:, :x.size(1), :]
         x = self.transformer_encoder(x)
         x = x[:, -1, :]  # Use last token
-        x = self.relu(self.shared_dense(x))
-        cls_out = self.sigmoid(self.classifier(x))
-        reg_x = self.relu(self.regressor_dense(x))
-        reg_out = self.regressor(reg_x)
-        return cls_out, reg_out
+        shared_repr = self.relu(self.shared_dense(x))
+        
+        # Task 1 outputs
+        cls_out_1 = self.sigmoid(self.classifier_1(shared_repr))
+        reg_x_1 = self.relu(self.regressor_dense_1(shared_repr))
+        reg_out_1 = self.regressor_1(reg_x_1)
+        
+        # Task 2 outputs
+        cls_out_2 = self.sigmoid(self.classifier_2(shared_repr))
+        reg_x_2 = self.relu(self.regressor_dense_2(shared_repr))
+        reg_out_2 = self.regressor_2(reg_x_2)
+        
+        return cls_out_1, reg_out_1, cls_out_2, reg_out_2
 
-
-class ZeroInflatedLSTM(ZeroInflatedTSModule):
-    """
-    LSTM-based zero-inflated time series model.
-    Uses an LSTM to process sequential input data, with shared dense layers and separate heads for
-    classification (zero/non-zero) and regression (value prediction). Supports feature and target scaling.
-    Args:
-        input_size (int): Number of input features.
-        n_lags (int): Number of lag steps.
-        lstm_units (int): Number of LSTM units.
-        dense_units (int): Number of units in shared dense layer.
-    """
-    def __init__(self, input_size, n_lags=1, lstm_units=32, dense_units=16):
-        super().__init__()
-        self.lstm = nn.LSTM(input_size, lstm_units, batch_first=True)
-        self.shared_dense = nn.Linear(lstm_units, dense_units)
-        self.classifier = nn.Linear(dense_units, 1)
-        self.regressor_dense = nn.Linear(dense_units, dense_units)
-        self.regressor = nn.Linear(dense_units, 1)
-        self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()
-        self._input_size = input_size
-        self.n_lags = n_lags
-
-    def forward(self, x):
-        lstm_out, _ = self.lstm(x)
-        x = lstm_out[:, -1, :]
-        x = self.relu(self.shared_dense(x))
-        cls_out = self.sigmoid(self.classifier(x))
-        reg_x = self.relu(self.regressor_dense(x))
-        reg_out = self.regressor(reg_x)
-        return cls_out, reg_out

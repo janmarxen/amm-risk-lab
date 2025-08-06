@@ -19,85 +19,47 @@ import concurrent.futures
 from threading import Lock
 
 from python.utils.subgraph_utils import fetch_pool_hourly_data, fetch_pools_hourly_data_batched, fetch_pools_hourly_data_batched_parallel
+from python.utils.data_utils import *
 
 def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add engineered features to a pool DataFrame, including returns, rolling stats, and temporal features.
+    All features that could leak information about future targets are properly shifted.
+    
     Args:
         df (pd.DataFrame): Raw pool data.
     Returns:
         pd.DataFrame: DataFrame with added features.
     """
     df = df.copy()
+    
+    # Ensure datetime column exists
     if 'datetime' not in df.columns:
         df['datetime'] = pd.to_datetime(df['periodStartUnix'], unit='s')
     df = df.sort_values('datetime').reset_index(drop=True)
+    
+    # Ensure proper data types
     df['price'] = df['price'].astype(np.float64)
     df['liquidity'] = df['liquidity'].astype(np.float64)
     df['volumeUSD'] = df['volumeUSD'].astype(np.float64)
-    # Returns
-    df['price_return'] = df['price'].pct_change().astype(np.float64)
-    df['liquidity_return'] = df['liquidity'].pct_change().astype(np.float64)
-    df['volume_return'] = df['volumeUSD'].pct_change().astype(np.float64)
-    # Outlier removal with improved precision
-    def remove_outliers_iqr(series, k=3.0):
-        nonzero = series[series != 0]
-        if len(nonzero) < 10:  # Need minimum samples for robust statistics
-            return series
-        # Use more precise percentile calculation
-        q1 = nonzero.quantile(0.25, interpolation='linear')
-        q3 = nonzero.quantile(0.75, interpolation='linear')
-        iqr = q3 - q1
-        lower = q1 - k * iqr
-        upper = q3 + k * iqr
-        # Use more conservative replacement strategy
-        filtered = series.where((series >= lower) & (series <= upper), np.nan)
-        # Use forward-fill then backward-fill for better continuity
-        filtered = filtered.fillna(method='ffill').fillna(method='bfill')
-        return filtered
-    # Apply to desired columns
-    for col in ['price_return', 'liquidity_return', 'volume_return']:
-        if col in df.columns:
-            df[col] = remove_outliers_iqr(df[col])
-
-    ### Should shift be 1 or -1? ### 
-    # Price-based volatility and moving averages (shifted by 1 to avoid lookahead bias)
-    df['price_volatility_3h'] = df['price_return'].shift(1).rolling(window=3).std()
-    df['price_volatility_6h'] = df['price_return'].shift(1).rolling(window=6).std()
-    df['price_volatility_24h'] = df['price_return'].shift(1).rolling(window=24).std()
-    df['price_ma_3h'] = df['price_return'].shift(1).rolling(window=3).mean()
-    df['price_ma_6h'] = df['price_return'].shift(1).rolling(window=6).mean()
-    df['price_ma_24h'] = df['price_return'].shift(1).rolling(window=24).mean()
-    # Liquidity-based volatility and moving averages (shifted by 1 to avoid lookahead bias)
-    df['liquidity_volatility_3h'] = df['liquidity_return'].shift(1).rolling(window=3).std()
-    df['liquidity_volatility_6h'] = df['liquidity_return'].shift(1).rolling(window=6).std()
-    df['liquidity_volatility_24h'] = df['liquidity_return'].shift(1).rolling(window=24).std()
-    df['liquidity_ma_3h'] = df['liquidity_return'].shift(1).rolling(window=3).mean()
-    df['liquidity_ma_6h'] = df['liquidity_return'].shift(1).rolling(window=6).mean()
-    df['liquidity_ma_24h'] = df['liquidity_return'].shift(1).rolling(window=24).mean()
-    # Volume-based volatility and moving averages (shifted by 1 to avoid lookahead bias)
-    df['volume_volatility_3h'] = df['volume_return'].shift(1).rolling(window=3).std()
-    df['volume_volatility_6h'] = df['volume_return'].shift(1).rolling(window=6).std()
-    df['volume_volatility_24h'] = df['volume_return'].shift(1).rolling(window=24).std()
-    df['volume_ma_3h'] = df['volume_return'].shift(1).rolling(window=3).mean()
-    df['volume_ma_6h'] = df['volume_return'].shift(1).rolling(window=6).mean()
-    df['volume_ma_24h'] = df['volume_return'].shift(1).rolling(window=24).mean()
-    # Temporal features
-    df['hour'] = df['datetime'].dt.hour
-    df['day_of_week'] = df['datetime'].dt.dayofweek
-    df['month'] = df['datetime'].dt.month
-    def get_season(month):
-        if month in [12, 1, 2]:
-            return 0  # Winter
-        elif month in [3, 4, 5]:
-            return 1  # Spring
-        elif month in [6, 7, 8]:
-            return 2  # Summer
-        else:
-            return 3  # Fall
-    df['season'] = df['month'].apply(get_season)
+    
+    # Apply modular feature engineering functions
+    df = calculate_basic_returns(df)
+    df = calculate_volatility_features(df)
+    df = calculate_moving_averages(df)
+    df = calculate_cross_asset_features(df)
+    df = calculate_microstructure_features(df)
+    df = calculate_momentum_features(df)
+    df = calculate_volatility_regime_features(df)
+    df = calculate_liquidity_features(df)
+    df = calculate_temporal_features(df)
+    df = calculate_technical_indicators(df)
+    df = calculate_shock_detection_features(df)
+    
+    # Clean up
     if 'periodStartUnix' in df.columns:
         df = df.drop(columns=['periodStartUnix'])
+    
     return df
 
 def dropna(df: pd.DataFrame, features: List[str], target_col: str) -> pd.DataFrame:
@@ -113,116 +75,80 @@ def dropna(df: pd.DataFrame, features: List[str], target_col: str) -> pd.DataFra
     mask = df[features + [target_col]].notnull().all(axis=1)
     return df.loc[mask].reset_index(drop=True)
 
-# def get_X_y(df: pd.DataFrame, features: List[str], target_col: str, n_lags: int) -> Tuple[list, list, list]:
-#     """
-#     Convert a DataFrame to supervised learning arrays for ZeroInflated LSTM/Transformer:
-#     - X: lagged feature windows + target lags
-#     - y_cls: classification label (1 if target == 0, else 0)
-#     - y_reg: regression target
 
-#     Faster by leveraging NumPy vectorization.
-#     """
-#     # Drop rows with missing/infinite values first
-#     df = df.copy()
-#     df = df.replace([np.inf, -np.inf], np.nan)
-#     df = df.dropna(subset=features + [target_col])
-
-#     data_feats = df[features].to_numpy()
-#     data_target = df[target_col].to_numpy()
-
-#     T = len(df)
-    
-#     if T < n_lags + 1:  # Need at least n_lags+1 points for this alignment
-#         return [], [], []
-    
-#     # Use sliding window for features, INCLUDING present timestep
-#     feats_window = np.lib.stride_tricks.sliding_window_view(data_feats, (n_lags, data_feats.shape[1]))
-#     feats_window = feats_window[:, 0, :, :]  # shape: (T - n_lags + 1, n_lags, n_features)
-
-#     # Use sliding window for target lags, EXCLUDING present timestep (only past values)
-#     target_lags_past = np.lib.stride_tricks.sliding_window_view(data_target, n_lags-1)
-#     # shape: (T - n_lags + 2, n_lags-1)
-    
-#     # Get FUTURE target values (y) - predict t+1 using features up to t
-#     y = data_target[n_lags:]  # Predict target at t+1, using features from [t-n_lags+1, ..., t]
-    
-#     # Pad target lags to match n_lags sequence length expected by model
-#     target_lags_expanded = target_lags_past.reshape(target_lags_past.shape[0], n_lags-1, 1)
-#     # Pad with zeros for the "missing" present timestep to maintain model input shape
-#     zero_pad = np.zeros((target_lags_expanded.shape[0], 1, 1))
-#     target_lags_padded = np.concatenate([target_lags_expanded, zero_pad], axis=1)  # shape: (N, n_lags, 1)
-
-#     # Align arrays: target_lags_past starts 1 step later than feats_window
-#     # feats_window: indices [0, 1, 2, ..., T-n_lags] -> features for times [0:n_lags, 1:n_lags+1, ..., T-n_lags:T]
-#     # target_lags_past: indices [0, 1, 2, ..., T-n_lags+1] -> target lags for times [0:n_lags-1, 1:n_lags, ..., T-n_lags+1:T-1]
-#     # y: indices [0, 1, 2, ..., T-n_lags] -> targets for times [n_lags, n_lags+1, ..., T-1]
-    
-#     # Cut arrays to same final length
-#     min_len = min(len(feats_window), len(target_lags_padded), len(y))
-#     feats_window = feats_window[:min_len]  # Take first min_len samples
-#     target_lags_padded = target_lags_padded[1:min_len+1]  # Shift by 1 to align properly  
-#     y = y[:min_len]
-
-#     # Concatenate features and target lags  
-#     X = np.concatenate([feats_window, target_lags_padded], axis=2)  # shape: (N, n_lags, f+1)
-
-#     # Filter finite rows
-#     mask = np.isfinite(X).all(axis=(1, 2)) & np.isfinite(y)
-#     X = X[mask]
-#     y_reg = y[mask]
-#     y_cls = (y_reg == 0).astype(float)
-
-#     return X.tolist(), y_cls.tolist(), y_reg.tolist()
-
-def get_X_y(df: pd.DataFrame, features: List[str], target_col: str, n_lags: int) -> Tuple[list, list, list]:
+def get_X_y(df: pd.DataFrame, features: List[str], target_cols: List[str], n_lags: int) -> Tuple[list, list, list, list, list]:
     """
-    Convert a DataFrame to supervised learning arrays for ZeroInflated LSTM/Transformer:
+    Convert a DataFrame to supervised learning arrays for Multi-task ZeroInflated LSTM/Transformer:
     - X: lagged features (ending at t) + target lags (ending at t-1)
-    - y_cls: classification label (1 if target[t] == 0, else 0)
-    - y_reg: regression target (at time t)
+    - y_cls_1, y_cls_2: classification labels (1 if target == 0, else 0) for each target
+    - y_reg_1, y_reg_2: regression targets (at time t) for each target
     
-    Features at time t are valid - they don't leak information about target[t].
+    Features at time t are valid - they don't leak information about targets[t].
+    
+    Args:
+        df: Input DataFrame
+        features: List of feature column names
+        target_cols: List of exactly 2 target column names [target1, target2]
+        n_lags: Number of lag steps
+        
+    Returns:
+        X, y_cls_1, y_reg_1, y_cls_2, y_reg_2 as lists
     """
-
+    if len(target_cols) != 2:
+        raise ValueError("Multi-task model requires exactly 2 target columns")
+    
+    target_col_1, target_col_2 = target_cols
+    
     df = df.copy()
     df = df.replace([np.inf, -np.inf], np.nan)
-    df = df.dropna(subset=features + [target_col])
+    df = df.dropna(subset=features + target_cols)
 
     data_feats = df[features].to_numpy()
-    data_target = df[target_col].to_numpy()
+    data_target_1 = df[target_col_1].to_numpy()
+    data_target_2 = df[target_col_2].to_numpy()
     T = len(df)
 
     if T < n_lags + 1:
-        return [], [], []
+        return [], [], [], [], []
 
     # Feature window: t - n_lags + 1 to t (length = n_lags, INCLUDE present)
     feats_window = np.lib.stride_tricks.sliding_window_view(data_feats, (n_lags, data_feats.shape[1]))
     feats_window = feats_window[:, 0, :, :]  # shape: (T - n_lags + 1, n_lags, num_features)
 
-    # Target lag window: t - n_lags to t - 1 (length = n_lags, EXCLUDE present)
-    target_lags = np.lib.stride_tricks.sliding_window_view(data_target, n_lags + 1)
-    target_lags = target_lags[:, :-1]  # Remove value at t
-    target_lags = target_lags[:, :, np.newaxis]  # shape: (N, n_lags, 1)
+    # Target lag windows for both targets: t - n_lags to t - 1 (length = n_lags, EXCLUDE present)
+    target_1_lags = np.lib.stride_tricks.sliding_window_view(data_target_1, n_lags + 1)
+    target_1_lags = target_1_lags[:, :-1]  # Remove value at t
+    target_1_lags = target_1_lags[:, :, np.newaxis]  # shape: (N, n_lags, 1)
+    
+    target_2_lags = np.lib.stride_tricks.sliding_window_view(data_target_2, n_lags + 1)
+    target_2_lags = target_2_lags[:, :-1]  # Remove value at t
+    target_2_lags = target_2_lags[:, :, np.newaxis]  # shape: (N, n_lags, 1)
 
-    # Target at time t
-    y = data_target[n_lags:]
+    # Targets at time t
+    y_1 = data_target_1[n_lags:]
+    y_2 = data_target_2[n_lags:]
 
     # Match lengths
-    min_len = min(len(feats_window), len(target_lags), len(y))
+    min_len = min(len(feats_window), len(target_1_lags), len(target_2_lags), len(y_1), len(y_2))
     feats_window = feats_window[-min_len:]
-    target_lags = target_lags[-min_len:]
-    y = y[-min_len:]
+    target_1_lags = target_1_lags[-min_len:]
+    target_2_lags = target_2_lags[-min_len:]
+    y_1 = y_1[-min_len:]
+    y_2 = y_2[-min_len:]
 
-    # Concatenate features and target lags
-    X = np.concatenate([feats_window, target_lags], axis=2)  # shape: (N, n_lags, num_features + 1)
+    # Concatenate features and both target lags
+    X = np.concatenate([feats_window, target_1_lags, target_2_lags], axis=2)  # shape: (N, n_lags, num_features + 2)
 
-    # Filter valid
-    mask = np.isfinite(X).all(axis=(1, 2)) & np.isfinite(y)
+    # Filter valid samples
+    mask = (np.isfinite(X).all(axis=(1, 2)) & 
+            np.isfinite(y_1) & np.isfinite(y_2))
     X = X[mask]
-    y_reg = y[mask]
-    y_cls = (y_reg == 0).astype(float)
+    y_reg_1 = y_1[mask]
+    y_reg_2 = y_2[mask]
+    y_cls_1 = (y_reg_1 == 0).astype(float)
+    y_cls_2 = (y_reg_2 == 0).astype(float)
 
-    return X.tolist(), y_cls.tolist(), y_reg.tolist()
+    return X.tolist(), y_cls_1.tolist(), y_reg_1.tolist(), y_cls_2.tolist(), y_reg_2.tolist()
 
 
 def fetch_and_save_pools(
@@ -232,13 +158,13 @@ def fetch_and_save_pools(
     start_date: str,
     end_date: str,
     hdf5_path: str,
-    min_rows: int = 100,
+    min_rows: int = 10,
     mode: str = 'w',  # 'w' = overwrite pool, 'a' = append/update pool, 'x' = skip if exists
     fetch_mode: str = 'parallel',  # 'sequential', 'batched', or 'parallel'
     max_workers: int = 16  # Only used for parallel mode
 ):
     """
-    Fetch hourly data for each pool, apply feature engineering, and save to HDF5.
+    Fetch raw hourly data for each pool and save to HDF5 without feature engineering.
     Each pool is saved under key /pool_<address>. Metadata is saved under /meta.
     Args:
         api_key (str): The Graph API key.
@@ -276,8 +202,11 @@ def fetch_and_save_pools(
             df = pool_data_dict.get(addr, pd.DataFrame())
             n = len(df)
             if df is not None and n >= min_rows:
-                print(f"[{idx}/{total}] Fetching {addr} with {n} rows")
-                df = feature_engineer(df)
+                print(f"[{idx}/{total}] Saving {addr} with {n} rows (raw data)")
+                # Add datetime column if not present for consistency
+                if 'datetime' not in df.columns and 'periodStartUnix' in df.columns:
+                    df['datetime'] = pd.to_datetime(df['periodStartUnix'], unit='s')
+                
                 # Split columns by dtype
                 num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
                 str_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
@@ -305,6 +234,7 @@ def fetch_and_save_pools(
             meta_grp.attrs['pool_addresses'] = ','.join(fetched)
             meta_grp.attrs['fetch_time'] = time.time()
     print(f"Saved {len(fetched)} pools to {hdf5_path}")
+
 
 def load_pool_data(hdf5_path: str, pool_address: str) -> pd.DataFrame:
     """
@@ -510,28 +440,30 @@ def fit_scalers(
     hdf5_path: str,
     pool_addresses: list,
     features: list,
-    target: str,
+    targets: list,
     split_dates: dict = None,
     verbose: int = 1,
     num_workers: int = 16,
     sample_size_pct: float = 0.1,
     feature_scaler=None,
-    target_reg_scaler=None,
+    target_reg_scalers=None,
 ):
     """
-    Fit feature and target scalers on a random sample of the data.
+    Fit feature and target scalers on a random sample of the data for multi-task learning.
     Args:
         hdf5_path (str): Path to HDF5 file.
         pool_addresses (list): List of pool addresses to sample from.
         features (list): List of feature columns.
-        target (str): Target column name.
+        targets (list): List of exactly 2 target column names.
         split_dates (dict): Dict with split start/end dates.
         verbose (int): Print progress if 1.
         num_workers (int): Number of threads for parallel loading.
         sample_size_pct (float): Fraction of pool_addresses to use (0 < pct <= 1).
     Returns:
-        (feature_scaler, target_reg_scaler): Fitted StandardScaler objects.
+        (feature_scaler, target_reg_scalers): Fitted StandardScaler objects - scalers list for 2 targets.
     """
+    if len(targets) != 2:
+        raise ValueError("Multi-task model requires exactly 2 targets")
     if not (0 < sample_size_pct <= 1):
         raise ValueError("sample_size_pct must be in (0, 1]")
     n_sample = max(1, int(len(pool_addresses) * sample_size_pct))
@@ -542,14 +474,14 @@ def fit_scalers(
     # Allow passing in existing scalers, else create new ones
     if feature_scaler is None:
         feature_scaler = StandardScaler()
-    if target_reg_scaler is None:
-        target_reg_scaler = StandardScaler()
+    if target_reg_scalers is None:
+        target_reg_scalers = [StandardScaler(), StandardScaler()]
     scaler_lock = Lock()
 
     def process_and_partial_fit(addr):
         df = data_by_pool.get(addr)
         if df is None or df.empty:
-            return 0, 0
+            return 0, 0, 0
         # Time filtering (use train split if available)
         if split_dates:
             start, end = split_dates.get('train_start'), split_dates.get('train_end')
@@ -557,36 +489,42 @@ def fit_scalers(
                 df = df[df['datetime'] >= pd.to_datetime(start)]
             if end:
                 df = df[df['datetime'] <= pd.to_datetime(end)]
-        df = df.dropna(subset=features + [target])
+        df = df.dropna(subset=features + targets)
         if df.empty:
-            return 0, 0
+            return 0, 0, 0
         X = df[features].values
-        y = df[target].values.reshape(-1, 1)
+        y1 = df[targets[0]].values.reshape(-1, 1)
+        y2 = df[targets[1]].values.reshape(-1, 1)
         # Filter out non-finite rows
-        mask = np.isfinite(X).all(axis=1) & np.isfinite(y).flatten()
+        mask = (np.isfinite(X).all(axis=1) & 
+                np.isfinite(y1).flatten() & 
+                np.isfinite(y2).flatten())
         X = X[mask]
-        y = y[mask]
-        if X.shape[0] == 0 or y.shape[0] == 0:
-            return 0, 0
+        y1 = y1[mask]
+        y2 = y2[mask]
+        if X.shape[0] == 0 or y1.shape[0] == 0 or y2.shape[0] == 0:
+            return 0, 0, 0
         with scaler_lock:
             feature_scaler.partial_fit(X)
-            target_reg_scaler.partial_fit(y)
-        return X.shape[0], y.shape[0]
+            target_reg_scalers[0].partial_fit(y1)
+            target_reg_scalers[1].partial_fit(y2)
+        return X.shape[0], y1.shape[0], y2.shape[0]
 
-    total_X, total_y = 0, 0
+    total_X, total_y1, total_y2 = 0, 0, 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = [executor.submit(process_and_partial_fit, addr) for addr in sample_addresses]
         for i, f in enumerate(futures, 1):
-            n_x, n_y = f.result()
+            n_x, n_y1, n_y2 = f.result()
             total_X += n_x
-            total_y += n_y
+            total_y1 += n_y1
+            total_y2 += n_y2
             if verbose:
-                print(f"[fit_scalers] Processed {i}/{n_sample}: {n_x} feature, {n_y} target samples")
-    if total_X == 0 or total_y == 0:
+                print(f"[fit_scalers] Processed {i}/{n_sample}: {n_x} feature, {n_y1}/{n_y2} target samples")
+    if total_X == 0 or total_y1 == 0 or total_y2 == 0:
         raise ValueError("No data found for fitting scalers.")
     if verbose:
-        print(f"[fit_scalers] Fitted feature scaler on {total_X} samples, target scaler on {total_y} samples")
-    return feature_scaler, target_reg_scaler
+        print(f"[fit_scalers] Fitted feature scaler on {total_X} samples, target scalers on {total_y1}/{total_y2} samples")
+    return feature_scaler, target_reg_scalers
 
 
 class LPsDataset(Dataset):
@@ -595,19 +533,24 @@ class LPsDataset(Dataset):
         hdf5_path: str,
         pool_addresses: List[str] = None,
         features: List[str] = None,
-        target: str = None,
+        targets: List[str] = None,  # Must be list of exactly 2 targets
         n_lags: int = 1,
         split: str = 'train',
         split_dates: dict = None,
         feature_scaler=None,
-        target_reg_scaler=None,
+        target_reg_scalers=None,  # List of 2 scalers
         verbose: int = 0,
         num_workers: int = 16
     ):
-        self.X, self.y_cls, self.y_reg = [], [], []
+        if targets is None or len(targets) != 2:
+            raise ValueError("Must provide exactly 2 targets for multi-task learning")
+        
+        self.targets = targets
+        self.X, self.y_cls_1, self.y_reg_1, self.y_cls_2, self.y_reg_2 = [], [], [], [], []
+            
         self.split = split
         self.feature_scaler = feature_scaler
-        self.target_reg_scaler = target_reg_scaler
+        self.target_reg_scalers = target_reg_scalers if target_reg_scalers is not None else [None, None]
         # Load the pools' data into memory
         data_by_pool = load_selected_pools_in_memory(hdf5_path, pool_addresses)
         if pool_addresses is None:
@@ -627,73 +570,85 @@ class LPsDataset(Dataset):
         def filter_and_process(addr):
             df = data_by_pool.get(addr)
             if df is None or df.empty:
-                return [], [], []
+                return [], [], [], [], []
             # Time filtering
             if start:
                 df = df[df['datetime'] >= pd.to_datetime(start)]
             if end:
                 df = df[df['datetime'] <= pd.to_datetime(end)]
-            # Drop rows with NaNs in features or target
-            df = df.dropna(subset=features + [target])
+            # Drop rows with NaNs in features or targets
+            df = df.dropna(subset=features + self.targets)
             if df.empty:
-                return [], [], []
-            # Scale features and target independently per pool
+                return [], [], [], [], []
+            
+            # Scale features independently per pool
             X_feats = df[features].values
-            y_target = df[target].values.reshape(-1, 1)
-            # Ensure no non-finite values in target
-            if not np.all(np.isfinite(y_target)):
-                if verbose:
-                    print(f"[{addr}] Skipping due to bad target values: {y_target[~np.isfinite(y_target)]}")
-                return [], [], []
             # Ensure no non-finite values in features
             if not np.all(np.isfinite(X_feats)):
                 if verbose:
-                    print(f"[{addr}] Skipping due to bad feature values: {X_feats[~np.isfinite(X_feats)]}")
-                return [], [], []
+                    print(f"[{addr}] Skipping due to bad feature values")
+                return [], [], [], [], []
 
-            # Use passed-in scalers if provided, else fit per-pool
+            # Use passed-in scaler if provided, else fit per-pool
             if self.feature_scaler is not None:
                 X_feats_scaled = self.feature_scaler.transform(X_feats)
             else:
                 feature_scaler = StandardScaler()
                 X_feats_scaled = feature_scaler.fit_transform(X_feats)
-
-            if self.target_reg_scaler is not None:
-                y_target_scaled = self.target_reg_scaler.transform(y_target).flatten()
-            else:
-                target_scaler = StandardScaler()
-                y_target_scaled = target_scaler.fit_transform(y_target).flatten()
-
             df.loc[:, features] = X_feats_scaled
-            df.loc[:, target] = y_target_scaled
 
-            df['pool'] = addr  
-            return get_X_y(df, features, target, n_lags)
+            for i, target in enumerate(self.targets):
+                y_target = df[target].values.reshape(-1, 1)
+                # Ensure no non-finite values in target
+                if not np.all(np.isfinite(y_target)):
+                    if verbose:
+                        print(f"[{addr}] Skipping due to bad target values in {target}")
+                    return [], [], [], [], []
+                
+                # Use passed-in scaler if provided, else fit per-pool
+                if self.target_reg_scalers[i] is not None:
+                    y_target_scaled = self.target_reg_scalers[i].transform(y_target).flatten()
+                else:
+                    target_scaler = StandardScaler()
+                    y_target_scaled = target_scaler.fit_transform(y_target).flatten()
+                df.loc[:, target] = y_target_scaled
+            
+            df['pool'] = addr
+            return get_X_y(df, features, self.targets, n_lags)
+            
 
         if verbose:
             print(f"Loading {total} pools using {num_workers} threads...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = [executor.submit(filter_and_process, addr) for addr in pool_addresses]
             for i, f in enumerate(futures, 1):
-                X, y_cls, y_reg = f.result()
+                X, y_cls_1, y_reg_1, y_cls_2, y_reg_2 = f.result()
                 self.X.extend(X)
-                self.y_cls.extend(y_cls)
-                self.y_reg.extend(y_reg)
+                self.y_cls_1.extend(y_cls_1)
+                self.y_reg_1.extend(y_reg_1)
+                self.y_cls_2.extend(y_cls_2)
+                self.y_reg_2.extend(y_reg_2)
                 if verbose:
                     print(f"Processed {i}/{total}: {len(X)} samples")
 
         if self.X:
             self.X = torch.tensor(np.array(self.X), dtype=torch.float32)
-            self.y_cls = torch.tensor(np.array(self.y_cls), dtype=torch.float32)
-            self.y_reg = torch.tensor(np.array(self.y_reg), dtype=torch.float32)
+            self.y_cls_1 = torch.tensor(np.array(self.y_cls_1), dtype=torch.float32)
+            self.y_reg_1 = torch.tensor(np.array(self.y_reg_1), dtype=torch.float32)
+            self.y_cls_2 = torch.tensor(np.array(self.y_cls_2), dtype=torch.float32)
+            self.y_reg_2 = torch.tensor(np.array(self.y_reg_2), dtype=torch.float32)
         else:
-            d = len(features) + 1  # features + target lags (1 dimension)
+            d = len(features) + len(self.targets)  # features + target lags
             self.X = torch.empty((0, n_lags, d), dtype=torch.float32)
-            self.y_cls = torch.empty((0,), dtype=torch.float32)
-            self.y_reg = torch.empty((0,), dtype=torch.float32)
+            self.y_cls_1 = torch.empty((0,), dtype=torch.float32)
+            self.y_reg_1 = torch.empty((0,), dtype=torch.float32) 
+            self.y_cls_2 = torch.empty((0,), dtype=torch.float32)
+            self.y_reg_2 = torch.empty((0,), dtype=torch.float32)
 
     def __len__(self):
         return len(self.X)
 
     def __getitem__(self, idx):
-        return self.X[idx], self.y_cls[idx], self.y_reg[idx]
+        return (self.X[idx], 
+               self.y_cls_1[idx], self.y_reg_1[idx],
+               self.y_cls_2[idx], self.y_reg_2[idx])

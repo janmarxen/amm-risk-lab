@@ -3,7 +3,7 @@ Priority:
 - Implement model loading in C++ for inference (or create microservice?)
 - Create test script using PLV models.
 
-- Implement multi-task model.
+- Download data first into scratch. Then apply transformations and save into new file. 
 - Ameliorate outlier removal mechanism and see correctness of processed data.
 - Implement data augmentation techniques
 
