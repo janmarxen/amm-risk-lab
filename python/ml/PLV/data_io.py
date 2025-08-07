@@ -151,6 +151,75 @@ def get_X_y(df: pd.DataFrame, features: List[str], target_cols: List[str], n_lag
     return X.tolist(), y_cls_1.tolist(), y_reg_1.tolist(), y_cls_2.tolist(), y_reg_2.tolist()
 
 
+def write_pools_to_hdf5(
+    h5f,
+    pool_data_dict: Dict[str, pd.DataFrame],
+    hdf5_path: str,
+    min_rows: int = 10,
+    mode: str = 'a',  # 'w' = overwrite pool, 'a' = append/update pool, 'x' = skip if exists
+    data_description: str = "data"  # Description for logging (e.g., "raw data", "transformed data")
+) -> List[str]:
+    """
+    Write pool data from a dictionary to HDF5 file.
+    
+    Args:
+        h5f: Open HDF5 file handle.
+        pool_data_dict (Dict[str, pd.DataFrame]): Dictionary mapping pool addresses to DataFrames.
+        hdf5_path (str): Path to HDF5 file (for logging).
+        min_rows (int): Minimum number of rows required to save pool.
+        mode (str): 'w' (overwrite), 'a' (append/update), 'x' (skip if exists).
+        data_description (str): Description for logging.
+    
+    Returns:
+        List[str]: List of successfully saved pool addresses (lowercase).
+    """
+    fetched = []
+    pool_addresses = list(pool_data_dict.keys())
+    total = len(pool_addresses)
+    
+    for idx, addr in enumerate(pool_addresses, 1):
+        pool_key = f'pool_{addr.lower()}'
+        if mode == 'x' and pool_key in h5f:
+            print(f"[{idx}/{total}] Skipping {addr}: already exists in {hdf5_path}")
+            continue
+        df = pool_data_dict.get(addr, pd.DataFrame())
+        n = len(df)
+        if df is not None and n >= min_rows:
+            print(f"[{idx}/{total}] Saving {addr} with {n} rows ({data_description})")
+            # Add datetime column if not present for consistency
+            if 'datetime' not in df.columns and 'periodStartUnix' in df.columns:
+                df['datetime'] = pd.to_datetime(df['periodStartUnix'], unit='s')
+            
+            # Split columns by dtype
+            num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            str_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
+            grp = h5f.require_group(pool_key)
+            # Remove existing datasets if overwriting
+            if pool_key in h5f and mode == 'w':
+                for k in list(grp.keys()):
+                    del grp[k]
+            # Save numeric data
+            if num_cols:
+                grp.create_dataset('data', data=df[num_cols].to_numpy(), compression='gzip', chunks=True)
+                dt = h5py.string_dtype(encoding='utf-8')
+                grp.create_dataset('num_columns', data=np.array(num_cols, dtype=object), dtype=dt)
+            # Save string/object data
+            if str_cols:
+                str_data = df[str_cols].astype(str).to_numpy()
+                dt = h5py.string_dtype(encoding='utf-8')
+                grp.create_dataset('strings', data=str_data, dtype=dt, compression='gzip', chunks=True)
+                grp.create_dataset('str_columns', data=np.array(str_cols, dtype=object), dtype=dt)
+            fetched.append(addr.lower())
+        else:
+            print(f"[{idx}/{total}] Skipping {addr}: insufficient data")
+        # Save metadata
+        meta_grp = h5f.require_group('meta')
+        meta_grp.attrs['pool_addresses'] = ','.join(fetched)
+        meta_grp.attrs['fetch_time'] = time.time()
+    
+    return fetched
+
+
 def fetch_and_save_pools(
     api_key: str,
     subgraph_id: str,
@@ -180,8 +249,6 @@ def fetch_and_save_pools(
     Returns:
         None
     """
-    fetched = []
-    total = len(pool_addresses)
     # Open HDF5 file in append mode
     with h5py.File(hdf5_path, 'a') as h5f:
         # Fetch all pools according to fetch_mode
@@ -194,45 +261,13 @@ def fetch_and_save_pools(
             pool_data_dict = fetch_pools_hourly_data_batched(api_key, subgraph_id, pool_addresses, start_date, end_date)
         else:  # 'parallel' (default)
             pool_data_dict = fetch_pools_hourly_data_batched_parallel(api_key, subgraph_id, pool_addresses, start_date, end_date, max_workers=max_workers)
-        for idx, addr in enumerate(pool_addresses, 1):
-            pool_key = f'pool_{addr.lower()}'
-            if mode == 'x' and pool_key in h5f:
-                print(f"[{idx}/{total}] Skipping {addr}: already exists in {hdf5_path}")
-                continue
-            df = pool_data_dict.get(addr, pd.DataFrame())
-            n = len(df)
-            if df is not None and n >= min_rows:
-                print(f"[{idx}/{total}] Saving {addr} with {n} rows (raw data)")
-                # Add datetime column if not present for consistency
-                if 'datetime' not in df.columns and 'periodStartUnix' in df.columns:
-                    df['datetime'] = pd.to_datetime(df['periodStartUnix'], unit='s')
-                
-                # Split columns by dtype
-                num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-                str_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
-                grp = h5f.require_group(pool_key)
-                # Remove existing datasets if overwriting
-                if pool_key in h5f and mode == 'w':
-                    for k in list(grp.keys()):
-                        del grp[k]
-                # Save numeric data
-                if num_cols:
-                    grp.create_dataset('data', data=df[num_cols].to_numpy(), compression='gzip', chunks=True)
-                    dt = h5py.string_dtype(encoding='utf-8')
-                    grp.create_dataset('num_columns', data=np.array(num_cols, dtype=object), dtype=dt)
-                # Save string/object data
-                if str_cols:
-                    str_data = df[str_cols].astype(str).to_numpy()
-                    dt = h5py.string_dtype(encoding='utf-8')
-                    grp.create_dataset('strings', data=str_data, dtype=dt, compression='gzip', chunks=True)
-                    grp.create_dataset('str_columns', data=np.array(str_cols, dtype=object), dtype=dt)
-                fetched.append(addr.lower())
-            else:
-                print(f"[{idx}/{total}] Skipping {addr}: insufficient data")
-            # Save metadata
-            meta_grp = h5f.require_group('meta')
-            meta_grp.attrs['pool_addresses'] = ','.join(fetched)
-            meta_grp.attrs['fetch_time'] = time.time()
+        
+        # Use the refactored write function
+        fetched = write_pools_to_hdf5(
+            h5f, pool_data_dict, hdf5_path, 
+            min_rows=min_rows, mode=mode, data_description="raw data"
+        )
+    
     print(f"Saved {len(fetched)} pools to {hdf5_path}")
 
 

@@ -33,7 +33,7 @@ def remove_outliers_iqr(series: pd.Series, k: float = 3.0) -> pd.Series:
     # Use more conservative replacement strategy
     filtered = series.where((series >= lower) & (series <= upper), np.nan)
     # Use forward-fill then backward-fill for better continuity
-    filtered = filtered.fillna(method='ffill').fillna(method='bfill')
+    filtered = filtered.ffill().bfill()
     return filtered
 
 def calculate_basic_returns(df: pd.DataFrame) -> pd.DataFrame:

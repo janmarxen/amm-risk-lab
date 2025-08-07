@@ -33,7 +33,7 @@ from python.utils.distributed_utils import *
 def main(args):
     local_rank, rank, device = setup()
 
-    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data_2.h5")
+    hdf5_path = args.input_hdf5
     model_dir = os.path.join("/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models")
     model_path = os.path.join(model_dir, f"{args.model_name}.pt")
 
@@ -151,6 +151,9 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--input_hdf5', type=str, required=False, 
+                       default="/p/scratch/training2529/uniswap_pools_data_transformed.h5",
+                       help="Path to input HDF5 file with transformed pool data")
     parser.add_argument('--n_lags', type=int, required=True)
     parser.add_argument('--batch_size', type=int, required=True)
     parser.add_argument('--dense_units', type=int, required=True)

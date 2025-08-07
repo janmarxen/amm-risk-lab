@@ -11,6 +11,7 @@ N_POOLS=50000
 START_DATE="2023-01-01"
 END_DATE="2025-07-01"
 MAIN_POOL_ADDRESS="0xcbcdf9626bc03e24f779434178a73a0b4bad62ed"
+OUTPUT_HDF5="/p/scratch/training2529/uniswap_pools_data.h5"
 
 
 # Activate environment
@@ -22,6 +23,7 @@ python3 -m python.ml.PLV.scripts.run_data_download \
     --subgraph_id $SUBGRAPH_ID \
     --start_date $START_DATE \
     --end_date $END_DATE \
+    --output_hdf5 $OUTPUT_HDF5 \
     --main_pool_address $MAIN_POOL_ADDRESS \
     --n_pools $N_POOLS
 

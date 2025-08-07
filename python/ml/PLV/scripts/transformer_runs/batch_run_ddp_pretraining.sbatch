@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=transformer_pretraining
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --gres=gpu:4 
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=02:00:00
+#SBATCH --time=00:30:00
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
 
@@ -36,10 +36,9 @@ export CUDA_LAUNCH_BLOCKING=0
 set -e
 
 ### Configuration ###
-API_KEY="d1762c97d76a973e078c5536742bd237"
-SUBGRAPH_ID="5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV"
+INPUT_HDF5="/p/scratch/training2529/uniswap_pools_data_transformed.h5"
 
-MODEL_NAME="transformer_pretrained_2"
+MODEL_NAME="transformer_pretrained"
 N_LAGS=5       
 BATCH_SIZE=1024 
 D_MODEL=16      
@@ -75,6 +74,7 @@ srun --cpu_bind=none bash -c "torchrun_jsc \
     --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
     --rdzv_conf=is_host=\$(if ((SLURM_NODEID)); then echo 0; else echo 1; fi) \
     python/ml/PLV/scripts/run_ddp_pretraining.py \
+    --input_hdf5 $INPUT_HDF5 \
     --n_lags $N_LAGS \
     --batch_size $BATCH_SIZE \
     --d_model $D_MODEL \
