@@ -5,7 +5,7 @@ Utility functions and PyTorch Dataset for loading, engineering, and preparing Un
 """
 import pandas as pd
 import time
-from typing import List, Dict, Tuple
+from typing import List, Dict
 import numpy as np
 import h5py
 
@@ -19,137 +19,7 @@ import concurrent.futures
 from threading import Lock
 
 from python.utils.subgraph_utils import fetch_pool_hourly_data, fetch_pools_hourly_data_batched, fetch_pools_hourly_data_batched_parallel
-from python.utils.data_utils import *
-
-def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Add engineered features to a pool DataFrame, including returns, rolling stats, and temporal features.
-    All features that could leak information about future targets are properly shifted.
-    
-    Args:
-        df (pd.DataFrame): Raw pool data.
-    Returns:
-        pd.DataFrame: DataFrame with added features.
-    """
-    df = df.copy()
-    
-    # Ensure datetime column exists
-    if 'datetime' not in df.columns:
-        df['datetime'] = pd.to_datetime(df['periodStartUnix'], unit='s')
-    df = df.sort_values('datetime').reset_index(drop=True)
-    
-    # Ensure proper data types
-    df['price'] = df['price'].astype(np.float64)
-    df['liquidity'] = df['liquidity'].astype(np.float64)
-    df['volumeUSD'] = df['volumeUSD'].astype(np.float64)
-    
-    # Apply modular feature engineering functions
-    df = calculate_basic_returns(df)
-    df = calculate_volatility_features(df)
-    df = calculate_moving_averages(df)
-    df = calculate_cross_asset_features(df)
-    df = calculate_microstructure_features(df)
-    df = calculate_momentum_features(df)
-    df = calculate_volatility_regime_features(df)
-    df = calculate_liquidity_features(df)
-    df = calculate_temporal_features(df)
-    df = calculate_technical_indicators(df)
-    df = calculate_shock_detection_features(df)
-    
-    # Clean up
-    if 'periodStartUnix' in df.columns:
-        df = df.drop(columns=['periodStartUnix'])
-    
-    return df
-
-def dropna(df: pd.DataFrame, features: List[str], target_col: str) -> pd.DataFrame:
-    """
-    Drop rows with NaNs in any of the selected features or target column.
-    Args:
-        df (pd.DataFrame): Input DataFrame.
-        features (List[str]): List of feature columns.
-        target_col (str): Target column name.
-    Returns:
-        pd.DataFrame: DataFrame with rows containing NaNs dropped.
-    """
-    mask = df[features + [target_col]].notnull().all(axis=1)
-    return df.loc[mask].reset_index(drop=True)
-
-
-def get_X_y(df: pd.DataFrame, features: List[str], target_cols: List[str], n_lags: int) -> Tuple[list, list, list, list, list]:
-    """
-    Convert a DataFrame to supervised learning arrays for Multi-task ZeroInflated LSTM/Transformer:
-    - X: lagged features (ending at t) + target lags (ending at t-1)
-    - y_cls_1, y_cls_2: classification labels (1 if target == 0, else 0) for each target
-    - y_reg_1, y_reg_2: regression targets (at time t) for each target
-    
-    Features at time t are valid - they don't leak information about targets[t].
-    
-    Args:
-        df: Input DataFrame
-        features: List of feature column names
-        target_cols: List of exactly 2 target column names [target1, target2]
-        n_lags: Number of lag steps
-        
-    Returns:
-        X, y_cls_1, y_reg_1, y_cls_2, y_reg_2 as lists
-    """
-    if len(target_cols) != 2:
-        raise ValueError("Multi-task model requires exactly 2 target columns")
-    
-    target_col_1, target_col_2 = target_cols
-    
-    df = df.copy()
-    df = df.replace([np.inf, -np.inf], np.nan)
-    df = df.dropna(subset=features + target_cols)
-
-    data_feats = df[features].to_numpy()
-    data_target_1 = df[target_col_1].to_numpy()
-    data_target_2 = df[target_col_2].to_numpy()
-    T = len(df)
-
-    if T < n_lags + 1:
-        return [], [], [], [], []
-
-    # Feature window: t - n_lags + 1 to t (length = n_lags, INCLUDE present)
-    feats_window = np.lib.stride_tricks.sliding_window_view(data_feats, (n_lags, data_feats.shape[1]))
-    feats_window = feats_window[:, 0, :, :]  # shape: (T - n_lags + 1, n_lags, num_features)
-
-    # Target lag windows for both targets: t - n_lags to t - 1 (length = n_lags, EXCLUDE present)
-    target_1_lags = np.lib.stride_tricks.sliding_window_view(data_target_1, n_lags + 1)
-    target_1_lags = target_1_lags[:, :-1]  # Remove value at t
-    target_1_lags = target_1_lags[:, :, np.newaxis]  # shape: (N, n_lags, 1)
-    
-    target_2_lags = np.lib.stride_tricks.sliding_window_view(data_target_2, n_lags + 1)
-    target_2_lags = target_2_lags[:, :-1]  # Remove value at t
-    target_2_lags = target_2_lags[:, :, np.newaxis]  # shape: (N, n_lags, 1)
-
-    # Targets at time t
-    y_1 = data_target_1[n_lags:]
-    y_2 = data_target_2[n_lags:]
-
-    # Match lengths
-    min_len = min(len(feats_window), len(target_1_lags), len(target_2_lags), len(y_1), len(y_2))
-    feats_window = feats_window[-min_len:]
-    target_1_lags = target_1_lags[-min_len:]
-    target_2_lags = target_2_lags[-min_len:]
-    y_1 = y_1[-min_len:]
-    y_2 = y_2[-min_len:]
-
-    # Concatenate features and both target lags
-    X = np.concatenate([feats_window, target_1_lags, target_2_lags], axis=2)  # shape: (N, n_lags, num_features + 2)
-
-    # Filter valid samples
-    mask = (np.isfinite(X).all(axis=(1, 2)) & 
-            np.isfinite(y_1) & np.isfinite(y_2))
-    X = X[mask]
-    y_reg_1 = y_1[mask]
-    y_reg_2 = y_2[mask]
-    y_cls_1 = (y_reg_1 == 0).astype(float)
-    y_cls_2 = (y_reg_2 == 0).astype(float)
-
-    return X.tolist(), y_cls_1.tolist(), y_reg_1.tolist(), y_cls_2.tolist(), y_reg_2.tolist()
-
+from python.utils.data_utils import get_X_y, dropna_features_targets
 
 def write_pools_to_hdf5(
     h5f,
@@ -430,7 +300,7 @@ def make_lps_dataset_from_pool_dict(
                             df = df[df['datetime'] <= pd.to_datetime(end)]
                         df = df.copy()
                 df['pool'] = addr
-                df = dropna(df, features, target)
+                df = dropna_features_targets(df, features, target)
                 X, y_cls, y_reg = get_X_y(df, features, target, n_lags)
                 self.X.extend(X)
                 self.y_cls.extend(y_cls)

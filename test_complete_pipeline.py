@@ -17,14 +17,54 @@ def test_complete_pipeline():
     try:
         from python.ml.PLV.data_io import LPsDataset
         
-        # Configuration
+        # Configuration - ALL FEATURES CREATED BY FEATURE ENGINEERING
         FEATURES = [
-            "price_return", "price_volatility_3h", "price_volatility_6h", "price_volatility_24h",
+            # Basic returns
+            "price_return",
+            
+            # Volatility features
+            "price_volatility_3h", "price_volatility_6h", "price_volatility_24h",
             "liquidity_volatility_3h", "liquidity_volatility_6h", "liquidity_volatility_24h",
             "volume_volatility_3h", "volume_volatility_6h", "volume_volatility_24h",
+            
+            # Moving averages
             "price_ma_3h", "price_ma_6h", "price_ma_24h",
             "liquidity_ma_3h", "liquidity_ma_6h", "liquidity_ma_24h",
-            "hour", "day_of_week", "month", "season"
+            "volume_ma_3h", "volume_ma_6h", "volume_ma_24h",
+            
+            # Cross-asset features
+            "price_volume_corr_6h", "price_volume_corr_24h", "price_liquidity_corr_6h",
+            "volume_liquidity_return_ratio", "volume_liquidity_ratio_ma_6h", "volume_liquidity_ratio_volatility",
+            
+            # Microstructure features
+            "price_volatility_to_volume_ratio", "liquidity_return_depth_proxy",
+            "market_impact_proxy", "price_efficiency",
+            
+            # Momentum features
+            "price_momentum_3h", "price_momentum_12h", "price_momentum_24h",
+            "liquidity_momentum_6h", "liquidity_momentum_24h",
+            "volume_momentum_6h", "volume_momentum_24h",
+            "price_deviation_from_ma_6h", "price_deviation_from_ma_24h", "liquidity_deviation_from_ma_6h",
+            
+            # Volatility regime features
+            "high_vol_regime_3h", "high_vol_regime_24h", "vol_cluster_indicator", "vol_term_structure",
+            
+            # Liquidity features
+            "liquidity_return_concentration", "liquidity_return_percentile_6h", "liquidity_return_percentile_24h",
+            "liquidity_stress", "liquidity_abundance", "liquidity_stability",
+            
+            # Temporal features
+            "hour", "day_of_week", "month", "season",
+            "hour_sin", "hour_cos", "day_sin", "day_cos",
+            "us_market_hours", "asia_market_hours", "weekend",
+            
+            # Technical indicators
+            "price_rsi_6h", "price_rsi_24h", "liquidity_rsi_6h", "volume_rsi_6h",
+            "price_bb_upper_6h", "price_bb_lower_6h", "price_bb_position",
+            
+            # Shock detection features
+            "price_shock_3h", "price_shock_6h", "volume_spike", "volume_drought",
+            "liquidity_drain", "liquidity_injection"
         ]
         TARGETS = ["liquidity_return", "volume_return"]
         
@@ -52,7 +92,8 @@ def test_complete_pipeline():
         
         # 2. Sample a subset for testing
         print("2. Selecting sample pools for testing...")
-        sample_size = min(50, len(available_pools))  # Use up to 50 pools for testing
+        sample_size = min(500, len(available_pools))  # Use up to 50 pools for testing
+        # sample_size = len(available_pools)  # Use all available pools for testing
         sample_pools = random.sample(available_pools, sample_size)
         print(f"   ✓ Selected {len(sample_pools)} pools for testing")
         
@@ -63,7 +104,7 @@ def test_complete_pipeline():
             pool_addresses=sample_pools,
             features=FEATURES,
             targets=TARGETS,
-            n_lags=24,  # 24 hours of lag
+            n_lags=10,  # 24 hours of lag
             split='train',
             split_dates=SPLIT_DATES,
             verbose=1
@@ -77,7 +118,7 @@ def test_complete_pipeline():
             pool_addresses=sample_pools,
             features=FEATURES,
             targets=TARGETS,
-            n_lags=24,
+            n_lags=10,
             split='val',
             split_dates=SPLIT_DATES,
             verbose=1

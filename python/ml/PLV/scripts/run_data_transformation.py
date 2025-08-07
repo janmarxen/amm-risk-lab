@@ -33,7 +33,8 @@ except ImportError:
     MPI_AVAILABLE = False
     MPI = None
 
-from python.ml.PLV.data_io import feature_engineer, get_saved_pool_addresses, load_pool_data, write_pools_to_hdf5
+from python.ml.PLV.data_io import get_saved_pool_addresses, load_pool_data, write_pools_to_hdf5
+from python.utils.data_utils import feature_engineer
 
 def process_pool_in_memory(pool_address: str, input_hdf5_path: str) -> dict:
     """
@@ -112,6 +113,7 @@ def write_processed_pools_to_hdf5(pool_results: list, output_hdf5_path: str) -> 
     
     # Use the shared write function
     # PROBLEM IS THAT MAYBE ONE PROCESS IS OVERWRITING OTHER PROCESSES' DATA
+    # TEST WITH ONE PROCESS?
     with h5py.File(output_hdf5_path, 'a') as h5f:
         fetched = write_pools_to_hdf5(
             h5f, pool_data_dict, output_hdf5_path,

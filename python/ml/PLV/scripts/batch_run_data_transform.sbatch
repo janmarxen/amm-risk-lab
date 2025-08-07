@@ -6,9 +6,11 @@
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=00:30:00
+#SBATCH --time=00:20:00
 #SBATCH --output=data_transform_mpi_%j.out
 #SBATCH --error=data_transform_mpi_%j.err
+##SBATCH --output=/dev/null
+##SBATCH --error=/dev/null
 
 # Load environment
 echo "Loading environment..."
