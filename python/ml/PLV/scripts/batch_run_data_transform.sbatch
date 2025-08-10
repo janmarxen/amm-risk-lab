@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=data_transform_mpi
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:0
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=00:20:00
+#SBATCH --time=00:40:00
 #SBATCH --output=data_transform_mpi_%j.out
 #SBATCH --error=data_transform_mpi_%j.err
 ##SBATCH --output=/dev/null

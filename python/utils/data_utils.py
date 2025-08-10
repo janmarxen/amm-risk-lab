@@ -92,7 +92,18 @@ def feature_engineer(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
         df = calculate_shock_detection_features(df)
         
         # Handle missing values intelligently based on feature types
+        df = df.replace([np.inf, -np.inf], np.nan)
         df = handle_missing_values(df, verbose=False)
+        
+        # # Final cleanup: Replace any remaining infinite values with NaN
+        # # This catches any infinities that might have been introduced by complex calculations
+        # df = df.replace([np.inf, -np.inf], np.nan)
+        
+        # # Fill any new NaN values created by infinity replacement
+        # numeric_cols = df.select_dtypes(include=[np.number]).columns
+        # for col in numeric_cols:
+        #     if df[col].isnull().any():
+        #         df[col] = df[col].ffill().bfill().fillna(0)
         
         # Print feature engineering summary
         if verbose:
@@ -311,23 +322,28 @@ def remove_outliers_iqr(series: pd.Series, k: float = 3.0) -> pd.Series:
                   if insufficient data (<10 non-zero values) for robust statistics.
                   
     Note:
-        - Only considers non-zero values for percentile calculation to avoid bias from zeros
+        - Only considers non-zero, finite values for percentile calculation to avoid bias
         - Uses linear interpolation for more precise percentile calculation
         - Applies forward-fill then backward-fill for temporal continuity in time series
     """
-    nonzero = series[series != 0]
-    if len(nonzero) < 10:  # Need minimum samples for robust statistics
-        return series
+    # First replace infinities with NaN
+    series_clean = series.replace([np.inf, -np.inf], np.nan)
     
-    # Use more precise percentile calculation
-    q1 = nonzero.quantile(0.25, interpolation='linear')
-    q3 = nonzero.quantile(0.75, interpolation='linear')
+    # Filter to non-zero, finite values for robust statistics
+    nonzero_finite = series_clean[(series_clean != 0) & (series_clean.notna())]
+    if len(nonzero_finite) < 10:  # Need minimum samples for robust statistics
+        # Still clean infinities even if we can't do IQR
+        return series_clean.ffill().bfill().fillna(0)
+    
+    # Use more precise percentile calculation on finite values
+    q1 = nonzero_finite.quantile(0.25, interpolation='linear')
+    q3 = nonzero_finite.quantile(0.75, interpolation='linear')
     iqr = q3 - q1
     lower = q1 - k * iqr
     upper = q3 + k * iqr
     
     # Use more conservative replacement strategy
-    filtered = series.where((series >= lower) & (series <= upper), np.nan)
+    filtered = series_clean.where((series_clean >= lower) & (series_clean <= upper), np.nan)
     # Use forward-fill then backward-fill for better continuity
     filtered = filtered.ffill().bfill()
     return filtered

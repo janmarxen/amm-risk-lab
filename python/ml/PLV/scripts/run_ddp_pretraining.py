@@ -1,21 +1,21 @@
 """
 run_ddp_pretraining.py
 
-Distributed pretraining script for Uniswap V3 ML models using PyTorch DDP.
+Distributed pretraining script for Uniswap V3 ML models using PyTorch DDP with dataset sharding.
 
 High-level steps:
 1. Initialize distributed process group and set up device for each rank.
 2. Parse command-line arguments for model/data configuration.
 3. Load pool addresses and shuffle/select a subset for training.
-4. Construct distributed training and validation datasets where each pool gets its own 
-   fitted scaler within LPsDataset, since inter-pool distributions differ significantly.
-5. Build the Transformer model and wrap with DistributedDataParallel.
-6. Train the model using distributed data loaders and early stopping.
-7. Save the trained model (only on rank 0).
-8. Clean up and destroy the process group.
+4. Shard pools across processes - each process gets a distinct subset of pools.
+5. Create standard LPsDataset for each process using its assigned pools.
+6. Build the Transformer model and wrap with DistributedDataParallel.
+7. Train the model using distributed data loaders (no DistributedSampler needed).
+8. Save the trained model (only on rank 0).
+9. Clean up and destroy the process group.
 
-Note: Per-pool scaling is performed automatically within LPsDataset to handle the large
-distribution differences between different Uniswap V3 pools.
+Note: Dataset sharding ensures each process works on completely different pools,
+maximizing data parallelism efficiency without overlap.
 """
 
 import os
@@ -52,7 +52,6 @@ def main(args):
     if len(targets) != 2:
         print0("[run_ddp_pretraining.py] ERROR: Must specify exactly 2 targets for multi-task architecture.")
         sys.exit(1)
-    multi_task = True
     n_lags = args.n_lags
     batch_size = args.batch_size
     dense_units = args.dense_units
@@ -67,9 +66,10 @@ def main(args):
         'test_end': args.test_end
     }
 
-    print0(f"[run_ddp_training.py] Configuration:")
+    print0(f"[run_ddp_pretraining.py] Configuration:")
     for k, v in vars(args).items():
         print0(f"  {k}: {v}")
+    
     print0("Preparing dataset...")
     pool_addresses = get_saved_pool_addresses(hdf5_path)
     print0(f"Number of pools in HDF5: {len(pool_addresses)}")
@@ -78,36 +78,84 @@ def main(args):
     N = args.n_pools
     pool_addresses = pool_addresses[:N]
     print0("Loading dataset...")
+    
+    # Shard pools across processes for distributed training
+    world_size = torch.distributed.get_world_size()
+    pools_per_process = len(pool_addresses) // world_size
+    start_idx = rank * pools_per_process
+    
+    if rank == world_size - 1:
+        # Last process takes any remaining pools
+        end_idx = len(pool_addresses)
+    else:
+        end_idx = start_idx + pools_per_process
+    
+    process_pool_addresses = pool_addresses[start_idx:end_idx]
+    print0(f"Process {rank}: Using pools {start_idx}-{end_idx-1} ({len(process_pool_addresses)} pools)")
+    
+    # Create datasets - standard dataset with per-process pool sharding
     train_dataset = LPsDataset(
         hdf5_path=hdf5_path,
-        pool_addresses=pool_addresses,
+        pool_addresses=process_pool_addresses,
         features=features,
         targets=targets,
-        n_lags=n_lags,
-        split='train',
         split_dates=split_dates,
-        num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)),
+        split='train',
+        n_lags=n_lags,
+        verbose=1 if rank == 0 else 0
     )
+    
     val_dataset = LPsDataset(
         hdf5_path=hdf5_path,
-        pool_addresses=pool_addresses,
+        pool_addresses=process_pool_addresses,
         features=features,
         targets=targets,
-        n_lags=n_lags,
-        split='val',
         split_dates=split_dates,
-        num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)),
+        split='val',
+        n_lags=n_lags,
+        verbose=1 if rank == 0 else 0
     )
-    print0(f"Number of training samples: {len(train_dataset)}")
-    print0(f"Number of validation samples: {len(val_dataset)}")
-    train_sampler = torch.utils.data.distributed.DistributedSampler(
-        train_dataset, shuffle=True, seed=args.seed if hasattr(args, 'seed') else 42)
-    val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, sampler=train_sampler, num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)), pin_memory=True, drop_last=True)
-    val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, sampler=val_sampler, num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)), pin_memory=True, drop_last=False)
     
+    # Print dataset info - gather statistics from sharded datasets
+    local_train_samples = len(train_dataset)
+    local_val_samples = len(val_dataset)
+    
+    # Use atomic_print to show per-process statistics
+    from python.utils.distributed_utils import atomic_print
+    atomic_print(f"Local samples - Train: {local_train_samples}, Val: {local_val_samples}, Pools: {len(process_pool_addresses)}")
+    
+    # Calculate total across all processes (only print on rank 0)
+    total_train_samples = torch.tensor(local_train_samples, device=device)
+    total_val_samples = torch.tensor(local_val_samples, device=device)
+    torch.distributed.all_reduce(total_train_samples, op=torch.distributed.ReduceOp.SUM)
+    torch.distributed.all_reduce(total_val_samples, op=torch.distributed.ReduceOp.SUM)
+    
+    print0(f"Total training samples across all processes: {total_train_samples.item()}")
+    print0(f"Total validation samples across all processes: {total_val_samples.item()}")
+    print0(f"Total number of pools across all processes: {len(pool_addresses)}")
+    print0(f"Number of features: {len(features)}")
+    
+    # Create DataLoaders - standard dataset with dataset-level sharding (no DistributedSampler)
+    num_workers = int(os.getenv('SLURM_CPUS_PER_TASK', 4))
+    print0("Creating DataLoaders for standard Dataset with dataset-level sharding (no DistributedSampler)")
+    
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,  # Each process shuffles its own shard
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=True
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,  # No shuffling for validation
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=False
+    )
+
     # Calculate input size: features + target lags (2 targets)
     input_size = len(features) + len(targets)
     model = ZeroInflatedTransformer(
@@ -174,6 +222,7 @@ def parse_args():
     parser.add_argument('--features', type=str, required=False, default=None, help='Comma-separated list of features')
     parser.add_argument('--targets', type=str, required=True, help='Comma-separated list of exactly 2 target column names')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    
     return parser.parse_args()
 
 if __name__ == "__main__":

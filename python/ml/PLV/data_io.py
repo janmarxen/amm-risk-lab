@@ -1,13 +1,15 @@
 """
 data_io.py
 
-Utility functions and PyTorch Dataset for loading, engineering, and preparing Uniswap V3 pool data for ML models.
+Simplified utility functions and PyTorch Dataset for loading, engineering, and preparing Uniswap V3 pool data for ML models.
+Only supports standard LPsDataset with dataset sharding for distributed training.
 """
 import pandas as pd
 import time
 from typing import List, Dict
 import numpy as np
 import h5py
+import gc
 
 from sklearn.preprocessing import StandardScaler
 import random
@@ -50,38 +52,43 @@ def write_pools_to_hdf5(
     for idx, addr in enumerate(pool_addresses, 1):
         pool_key = f'pool_{addr.lower()}'
         if mode == 'x' and pool_key in h5f:
-            print(f"[{idx}/{total}] Skipping {addr}: already exists in {hdf5_path}")
+            print(f"Skipping existing pool {addr} ({idx}/{total})")
             continue
+        
         df = pool_data_dict.get(addr, pd.DataFrame())
         n = len(df)
         if df is not None and n >= min_rows:
-            print(f"[{idx}/{total}] Saving {addr} with {n} rows ({data_description})")
-            # Add datetime column if not present for consistency
-            if 'datetime' not in df.columns and 'periodStartUnix' in df.columns:
-                df['datetime'] = pd.to_datetime(df['periodStartUnix'], unit='s')
+            # Separate numeric and string columns for efficient storage
+            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            string_cols = df.select_dtypes(include=['object']).columns.tolist()
             
-            # Split columns by dtype
-            num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            str_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
             grp = h5f.require_group(pool_key)
-            # Remove existing datasets if overwriting
-            if pool_key in h5f and mode == 'w':
-                for k in list(grp.keys()):
-                    del grp[k]
-            # Save numeric data
-            if num_cols:
-                grp.create_dataset('data', data=df[num_cols].to_numpy(), compression='gzip', chunks=True)
-                dt = h5py.string_dtype(encoding='utf-8')
-                grp.create_dataset('num_columns', data=np.array(num_cols, dtype=object), dtype=dt)
-            # Save string/object data
-            if str_cols:
-                str_data = df[str_cols].astype(str).to_numpy()
-                dt = h5py.string_dtype(encoding='utf-8')
-                grp.create_dataset('strings', data=str_data, dtype=dt, compression='gzip', chunks=True)
-                grp.create_dataset('str_columns', data=np.array(str_cols, dtype=object), dtype=dt)
+            
+            # Store numeric data
+            if numeric_cols:
+                numeric_data = df[numeric_cols].values
+                if 'data' in grp:
+                    del grp['data']
+                if 'num_columns' in grp:
+                    del grp['num_columns']
+                grp.create_dataset('data', data=numeric_data, compression='gzip')
+                grp.create_dataset('num_columns', data=[col.encode() for col in numeric_cols])
+            
+            # Store string data separately
+            if string_cols:
+                string_data = df[string_cols].values.astype('S')
+                if 'strings' in grp:
+                    del grp['strings']
+                if 'str_columns' in grp:
+                    del grp['str_columns']
+                grp.create_dataset('strings', data=string_data, compression='gzip')
+                grp.create_dataset('str_columns', data=[col.encode() for col in string_cols])
+            
             fetched.append(addr.lower())
+            print(f"Saved pool {addr} with {n} rows of {data_description} ({idx}/{total})")
         else:
-            print(f"[{idx}/{total}] Skipping {addr}: insufficient data")
+            print(f"Skipped pool {addr}: insufficient data ({n} < {min_rows} rows) ({idx}/{total})")
+        
         # Save metadata
         meta_grp = h5f.require_group('meta')
         meta_grp.attrs['pool_addresses'] = ','.join(fetched)
@@ -125,12 +132,13 @@ def fetch_and_save_pools(
         if fetch_mode == 'sequential':
             pool_data_dict = {}
             for addr in pool_addresses:
-                df = fetch_pool_hourly_data(api_key, subgraph_id, addr, start_date, end_date)
-                pool_data_dict[addr] = df
+                pool_data_dict[addr] = fetch_pool_hourly_data(api_key, subgraph_id, addr, start_date, end_date)
         elif fetch_mode == 'batched':
             pool_data_dict = fetch_pools_hourly_data_batched(api_key, subgraph_id, pool_addresses, start_date, end_date)
-        else:  # 'parallel' (default)
-            pool_data_dict = fetch_pools_hourly_data_batched_parallel(api_key, subgraph_id, pool_addresses, start_date, end_date, max_workers=max_workers)
+        else:            
+            pool_data_dict = fetch_pools_hourly_data_batched_parallel(
+                api_key, subgraph_id, pool_addresses, start_date, end_date, max_workers=max_workers
+            )
         
         # Use the refactored write function
         fetched = write_pools_to_hdf5(
@@ -156,27 +164,27 @@ def load_pool_data(hdf5_path: str, pool_address: str) -> pd.DataFrame:
     pool_key = f'pool_{pool_address.lower()}'
     with h5py.File(hdf5_path, 'r') as h5f:
         if pool_key not in h5f:
-            raise KeyError(f"Pool {pool_address} not found in {hdf5_path}")
+            raise KeyError(f"Pool {pool_address} not found in HDF5 file")
         grp = h5f[pool_key]
         dfs = []
         # Numeric columns
         if 'data' in grp and 'num_columns' in grp:
-            data = grp['data'][()]
-            num_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['num_columns'][()]]
-            dfs.append(pd.DataFrame(data, columns=num_columns))
+            num_data = grp['data'][:]
+            num_columns = [col.decode() for col in grp['num_columns'][:]]
+            dfs.append(pd.DataFrame(num_data, columns=num_columns))
         # String columns
         if 'strings' in grp and 'str_columns' in grp:
-            str_data = grp['strings'][()]
-            str_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['str_columns'][()]]
-            dfs.append(pd.DataFrame(str_data, columns=str_columns))
+            str_data = grp['strings'][:]
+            str_columns = [col.decode() for col in grp['str_columns'][:]]
+            str_df = pd.DataFrame(str_data, columns=str_columns)
+            # Decode bytes to strings
+            for col in str_columns:
+                str_df[col] = str_df[col].apply(lambda x: x.decode() if isinstance(x, bytes) else x)
+            dfs.append(str_df)
         if dfs:
-            df = pd.concat(dfs, axis=1)
-            # Convert 'datetime' column to pandas datetime if present, via string
-            if 'datetime' in df.columns:
-                df['datetime'] = pd.to_datetime(df['datetime'].astype(str), errors='coerce')
-            return df
+            return pd.concat(dfs, axis=1)
         else:
-            raise ValueError(f"No data found for pool {pool_address} in {hdf5_path}")
+            raise ValueError(f"No data found for pool {pool_address}")
 
 def load_selected_pools_in_memory(hdf5_path: str, pool_addresses: list) -> Dict[str, pd.DataFrame]:
     """
@@ -190,24 +198,35 @@ def load_selected_pools_in_memory(hdf5_path: str, pool_addresses: list) -> Dict[
     pool_dict = {}
     with h5py.File(hdf5_path, 'r') as h5f:
         for addr in pool_addresses:
-            key = f'pool_{addr.lower()}'
-            if key in h5f:
-                grp = h5f[key]
-                dfs = []
-                if 'data' in grp and 'num_columns' in grp:
-                    data = grp['data'][()]
-                    num_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['num_columns'][()]]
-                    dfs.append(pd.DataFrame(data, columns=num_columns))
-                if 'strings' in grp and 'str_columns' in grp:
-                    str_data = grp['strings'][()]
-                    str_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['str_columns'][()]]
-                    dfs.append(pd.DataFrame(str_data, columns=str_columns))
-                if dfs:
-                    df = pd.concat(dfs, axis=1)
-                    if 'datetime' in df.columns:
-                        df['datetime'] = pd.to_datetime(df['datetime'].astype(str), errors='coerce')
-                    pool_dict[addr] = df
+            try:
+                pool_key = f'pool_{addr.lower()}'
+                if pool_key in h5f:
+                    pool_dict[addr] = load_pool_data(hdf5_path, addr)
+            except (KeyError, ValueError):
+                continue  # Skip pools that can't be loaded
     return pool_dict
+
+
+def stream_pool_data(hdf5_path: str, pool_addresses: list):
+    """
+    Generator that yields (address, DataFrame) tuples one at a time for memory efficiency.
+    Use this when you need to process pools sequentially without keeping all in memory.
+    
+    Args:
+        hdf5_path (str): Path to HDF5 file.
+        pool_addresses (list): List of pool addresses to stream.
+    
+    Yields:
+        Tuple[str, pd.DataFrame]: (pool_address, dataframe) pairs.
+    """
+    with h5py.File(hdf5_path, 'r') as h5f:
+        for addr in pool_addresses:
+            try:
+                df = load_pool_data(hdf5_path, addr)
+                yield addr, df
+            except (KeyError, ValueError):
+                continue  # Skip pools that can't be loaded
+
 
 def load_all_pools_in_memory(hdf5_path: str) -> Dict[str, pd.DataFrame]:
     """
@@ -221,105 +240,12 @@ def load_all_pools_in_memory(hdf5_path: str) -> Dict[str, pd.DataFrame]:
     with h5py.File(hdf5_path, 'r') as h5f:
         for key in h5f.keys():
             if key.startswith('pool_'):
-                addr = key[5:]
-                grp = h5f[key]
-                dfs = []
-                if 'data' in grp and 'num_columns' in grp:
-                    data = grp['data'][()]
-                    num_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['num_columns'][()]]
-                    dfs.append(pd.DataFrame(data, columns=num_columns))
-                if 'strings' in grp and 'str_columns' in grp:
-                    str_data = grp['strings'][()]
-                    str_columns = [col.decode('utf-8') if isinstance(col, bytes) else str(col) for col in grp['str_columns'][()]]
-                    dfs.append(pd.DataFrame(str_data, columns=str_columns))
-                if dfs:
-                    df = pd.concat(dfs, axis=1)
-                    if 'datetime' in df.columns:
-                        df['datetime'] = pd.to_datetime(df['datetime'].astype(str), errors='coerce')
-                    pool_dict[addr] = df
+                addr = key[5:]  # Remove 'pool_' prefix
+                try:
+                    pool_dict[addr] = load_pool_data(hdf5_path, addr)
+                except (KeyError, ValueError):
+                    continue  # Skip pools that can't be loaded
     return pool_dict
-
-def make_lps_dataset_from_pool_dict(
-    pool_dict: Dict[str, pd.DataFrame],
-    pool_addresses: list,
-    features: list,
-    target: str,
-    n_lags: int,
-    split: str,
-    split_dates: dict,
-    verbose: int = 1
-) -> torch.utils.data.Dataset:
-    """
-    Construct LPsDataset from a dict of DataFrames, avoiding disk reads.
-    Args:
-        pool_dict (Dict[str, pd.DataFrame]): Mapping pool address to DataFrame.
-        pool_addresses (list): List of pool addresses to include.
-        features (list): List of feature columns.
-        target (str): Target column name.
-        n_lags (int): Number of lag steps.
-        split (str): 'train', 'val', or 'test'.
-        split_dates (dict): Dict with split start/end dates.
-        verbose (int): Print progress if 1.
-    Returns:
-        torch.utils.data.Dataset: In-memory dataset.
-    """
-    class InMemoryLPsDataset(torch.utils.data.Dataset):
-        def __init__(self):
-            self.X, self.y_cls, self.y_reg = [], [], []
-            total = len(pool_addresses)
-            for idx, addr in enumerate(pool_addresses, 1):
-                if addr not in pool_dict:
-                    if verbose:
-                        print(f"{idx}/{total}: Pool {addr} not found in memory, skipping.")
-                    continue
-                df = pool_dict[addr]
-                # Flexible split logic with custom start/end for each split
-                if split_dates is not None:
-                    if split == 'train':
-                        start = split_dates.get('train_start', None)
-                        end = split_dates.get('train_end', None)
-                        if start is not None:
-                            df = df[df['datetime'] >= pd.to_datetime(start)]
-                        if end is not None:
-                            df = df[df['datetime'] <= pd.to_datetime(end)]
-                        df = df.copy()
-                    elif split == 'val':
-                        start = split_dates.get('val_start', None)
-                        end = split_dates.get('val_end', None)
-                        if start is not None:
-                            df = df[df['datetime'] >= pd.to_datetime(start)]
-                        if end is not None:
-                            df = df[df['datetime'] <= pd.to_datetime(end)]
-                        df = df.copy()
-                    elif split == 'test':
-                        start = split_dates.get('test_start', None)
-                        end = split_dates.get('test_end', None)
-                        if start is not None:
-                            df = df[df['datetime'] >= pd.to_datetime(start)]
-                        if end is not None:
-                            df = df[df['datetime'] <= pd.to_datetime(end)]
-                        df = df.copy()
-                df['pool'] = addr
-                df = dropna_features_targets(df, features, target)
-                X, y_cls, y_reg = get_X_y(df, features, target, n_lags)
-                self.X.extend(X)
-                self.y_cls.extend(y_cls)
-                self.y_reg.extend(y_reg)
-                if verbose:
-                    print(f"{idx}/{total}: Pool {addr} Dataset processed")
-            if self.X:
-                self.X = torch.tensor(np.array(self.X), dtype=torch.float32)
-                self.y_cls = torch.tensor(self.y_cls, dtype=torch.float32)
-                self.y_reg = torch.tensor(self.y_reg, dtype=torch.float32)
-            else:
-                self.X = torch.empty((0, n_lags, len(features) + 1), dtype=torch.float32)  # +1 for target lag dimension
-                self.y_cls = torch.empty((0,), dtype=torch.float32)
-                self.y_reg = torch.empty((0,), dtype=torch.float32)
-        def __len__(self):
-            return len(self.X)
-        def __getitem__(self, idx):
-            return self.X[idx], self.y_cls[idx], self.y_reg[idx]
-    return InMemoryLPsDataset()
 
 def get_saved_pool_addresses(hdf5_path: str) -> List[str]:
     """
@@ -331,11 +257,9 @@ def get_saved_pool_addresses(hdf5_path: str) -> List[str]:
     """
     with h5py.File(hdf5_path, 'r') as h5f:
         if 'meta' in h5f:
-            meta_grp = h5f['meta']
-            pool_addresses_str = meta_grp.attrs.get('pool_addresses', '')
-            if isinstance(pool_addresses_str, bytes):
-                pool_addresses_str = pool_addresses_str.decode('utf-8')
-            return [addr for addr in pool_addresses_str.split(',') if addr]
+            addrs_str = h5f['meta'].attrs.get('pool_addresses', '')
+            if addrs_str:
+                return addrs_str.split(',')
         # Fallback: find all pool groups
         pools = [k for k in h5f.keys() if k.startswith('pool_')]
         return [p[5:] for p in pools]
@@ -389,11 +313,11 @@ def fit_scalers(
             return 0, 0, 0
         # Time filtering (use train split if available)
         if split_dates:
-            start, end = split_dates.get('train_start'), split_dates.get('train_end')
-            if start:
-                df = df[df['datetime'] >= pd.to_datetime(start)]
-            if end:
-                df = df[df['datetime'] <= pd.to_datetime(end)]
+            start_date = split_dates.get('train_start')
+            end_date = split_dates.get('train_end')
+            if start_date and end_date and 'datetime' in df.columns:
+                df['datetime'] = pd.to_datetime(df['datetime'])
+                df = df[(df['datetime'] >= start_date) & (df['datetime'] <= end_date)].copy()
         df = df.dropna(subset=features + targets)
         if df.empty:
             return 0, 0, 0
@@ -433,127 +357,145 @@ def fit_scalers(
 
 
 class LPsDataset(Dataset):
+    """
+    PyTorch Dataset for Liquidity Pool (LP) data with multi-task learning support.
+    Loads all specified pools into memory for fast access during training.
+    """
     def __init__(
         self,
         hdf5_path: str,
         pool_addresses: List[str] = None,
         features: List[str] = None,
-        targets: List[str] = None,  # Must be list of exactly 2 targets
-        n_lags: int = 1,
+        targets: List[str] = None,        n_lags: int = 1,
         split: str = 'train',
         split_dates: dict = None,
         feature_scaler=None,
-        target_reg_scalers=None,  # List of 2 scalers
-        verbose: int = 0,
+        target_reg_scalers=None,        verbose: int = 0,
         num_workers: int = 16
     ):
+        """
+        Initialize LPsDataset.
+        Args:
+            hdf5_path (str): Path to HDF5 file with pool data.
+            pool_addresses (List[str]): List of pool addresses to load.
+            features (List[str]): List of feature column names.
+            targets (List[str]): List of exactly 2 target column names.
+            n_lags (int): Number of time lags for sequence modeling.
+            split (str): Data split ('train', 'val', 'test').
+            split_dates (dict): Dictionary with date ranges for each split.
+            feature_scaler: Fitted feature scaler (StandardScaler).
+            target_reg_scalers: List of 2 fitted target scalers.
+            verbose (int): Verbosity level.
+            num_workers (int): Number of threads for parallel data loading.
+        """
         if targets is None or len(targets) != 2:
-            raise ValueError("Must provide exactly 2 targets for multi-task learning")
+            raise ValueError("Multi-task model requires exactly 2 targets")
         
+        self.hdf5_path = hdf5_path
+        self.features = features
         self.targets = targets
-        self.X, self.y_cls_1, self.y_reg_1, self.y_cls_2, self.y_reg_2 = [], [], [], [], []
-            
+        self.n_lags = n_lags
         self.split = split
+        self.split_dates = split_dates
         self.feature_scaler = feature_scaler
         self.target_reg_scalers = target_reg_scalers if target_reg_scalers is not None else [None, None]
-        # Load the pools' data into memory
-        data_by_pool = load_selected_pools_in_memory(hdf5_path, pool_addresses)
+        self.verbose = verbose
+        
+        # Get pool addresses
         if pool_addresses is None:
-            pool_addresses = list(data_by_pool.keys())
-        total = len(pool_addresses)
-        # Get start and end dates for the split
-        if split_dates:
-            if split == 'train':
-                start, end = split_dates.get('train_start'), split_dates.get('train_end')
-            elif split == 'val':
-                start, end = split_dates.get('val_start'), split_dates.get('val_end')
-            elif split == 'test':
-                start, end = split_dates.get('test_start'), split_dates.get('test_end')
-            else:
-                start = end = None
-
-        def filter_and_process(addr):
-            df = data_by_pool.get(addr)
-            if df is None or df.empty:
-                return [], [], [], [], []
-            # Time filtering
-            if start:
-                df = df[df['datetime'] >= pd.to_datetime(start)]
-            if end:
-                df = df[df['datetime'] <= pd.to_datetime(end)]
-            # Drop rows with NaNs in features or targets
-            df = df.dropna(subset=features + self.targets)
-            if df.empty:
-                return [], [], [], [], []
-            
-            # Scale features independently per pool
-            X_feats = df[features].values
-            # Ensure no non-finite values in features
-            if not np.all(np.isfinite(X_feats)):
-                if verbose:
-                    print(f"[{addr}] Skipping due to bad feature values")
-                return [], [], [], [], []
-
-            # Use passed-in scaler if provided, else fit per-pool
-            if self.feature_scaler is not None:
-                X_feats_scaled = self.feature_scaler.transform(X_feats)
-            else:
-                feature_scaler = StandardScaler()
-                X_feats_scaled = feature_scaler.fit_transform(X_feats)
-            df.loc[:, features] = X_feats_scaled
-
-            for i, target in enumerate(self.targets):
-                y_target = df[target].values.reshape(-1, 1)
-                # Ensure no non-finite values in target
-                if not np.all(np.isfinite(y_target)):
-                    if verbose:
-                        print(f"[{addr}] Skipping due to bad target values in {target}")
-                    return [], [], [], [], []
-                
-                # Use passed-in scaler if provided, else fit per-pool
-                if self.target_reg_scalers[i] is not None:
-                    y_target_scaled = self.target_reg_scalers[i].transform(y_target).flatten()
-                else:
-                    target_scaler = StandardScaler()
-                    y_target_scaled = target_scaler.fit_transform(y_target).flatten()
-                df.loc[:, target] = y_target_scaled
-            
-            df['pool'] = addr
-            return get_X_y(df, features, self.targets, n_lags)
-            
-
+            pool_addresses = get_saved_pool_addresses(hdf5_path)
+        self.pool_addresses = pool_addresses
+        
+        # Load all data into memory
         if verbose:
-            print(f"Loading {total} pools using {num_workers} threads...")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = [executor.submit(filter_and_process, addr) for addr in pool_addresses]
-            for i, f in enumerate(futures, 1):
-                X, y_cls_1, y_reg_1, y_cls_2, y_reg_2 = f.result()
-                self.X.extend(X)
-                self.y_cls_1.extend(y_cls_1)
-                self.y_reg_1.extend(y_reg_1)
-                self.y_cls_2.extend(y_cls_2)
-                self.y_reg_2.extend(y_reg_2)
-                if verbose:
-                    print(f"Processed {i}/{total}: {len(X)} samples")
+            print(f"[LPsDataset] Loading {len(pool_addresses)} pools into memory...")
+        
+        self.X = []
+        self.y = []
+        self._load_all_data(num_workers)
+        
+        if verbose:
+            print(f"[LPsDataset] Loaded {len(self.X)} total samples from {len(pool_addresses)} pools")
 
-        if self.X:
-            self.X = torch.tensor(np.array(self.X), dtype=torch.float32)
-            self.y_cls_1 = torch.tensor(np.array(self.y_cls_1), dtype=torch.float32)
-            self.y_reg_1 = torch.tensor(np.array(self.y_reg_1), dtype=torch.float32)
-            self.y_cls_2 = torch.tensor(np.array(self.y_cls_2), dtype=torch.float32)
-            self.y_reg_2 = torch.tensor(np.array(self.y_reg_2), dtype=torch.float32)
+    def _load_all_data(self, num_workers):
+        """Load all pool data into memory with parallel processing."""
+        def load_pool(pool_addr):
+            try:
+                df = load_pool_data(self.hdf5_path, pool_addr)
+                
+                # Apply time filtering based on split
+                if self.split_dates:
+                    start_date, end_date = self._get_split_dates()
+                    if start_date and end_date and 'datetime' in df.columns:
+                        df['datetime'] = pd.to_datetime(df['datetime'])
+                        df = df[(df['datetime'] >= start_date) & (df['datetime'] <= end_date)].copy()
+                
+                # Drop missing values
+                df = df.dropna(subset=self.features + self.targets)
+                if df.empty:
+                    return [], []
+                
+                # Get sequences with lags
+                X, y = get_X_y(
+                    df=df,
+                    features=self.features,
+                    targets=self.targets,
+                    n_lags=self.n_lags,
+                    feature_scaler=self.feature_scaler,
+                    target_reg_scalers=self.target_reg_scalers
+                )
+                
+                if X is None or y is None:
+                    return [], []
+                
+                return X, y
+                
+            except Exception as e:
+                if self.verbose:
+                    print(f"Warning: Could not load pool {pool_addr}: {e}")
+                return [], []
+        
+        # Load pools in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = [executor.submit(load_pool, addr) for addr in self.pool_addresses]
+            
+            for i, future in enumerate(futures, 1):
+                X_pool, y_pool = future.result()
+                if len(X_pool) > 0:
+                    self.X.extend(X_pool)
+                    self.y.extend(y_pool)
+                
+                if self.verbose and i % 100 == 0:
+                    print(f"[LPsDataset] Processed {i}/{len(self.pool_addresses)} pools, {len(self.X)} samples so far")
+        
+        # Convert to tensors
+        if len(self.X) > 0:
+            self.X = torch.FloatTensor(np.array(self.X))
+            self.y = torch.FloatTensor(np.array(self.y))
         else:
-            d = len(features) + len(self.targets)  # features + target lags
-            self.X = torch.empty((0, n_lags, d), dtype=torch.float32)
-            self.y_cls_1 = torch.empty((0,), dtype=torch.float32)
-            self.y_reg_1 = torch.empty((0,), dtype=torch.float32) 
-            self.y_cls_2 = torch.empty((0,), dtype=torch.float32)
-            self.y_reg_2 = torch.empty((0,), dtype=torch.float32)
+            # Empty dataset fallback
+            input_size = len(self.features) + len(self.targets)
+            self.X = torch.zeros(0, self.n_lags, input_size)
+            self.y = torch.zeros(0, len(self.targets))
+
+    def _get_split_dates(self):
+        """Get start and end dates for the current split."""
+        if self.split_dates is None:
+            return None, None
+        
+        if self.split == 'train':
+            return self.split_dates.get('train_start'), self.split_dates.get('train_end')
+        elif self.split == 'val':
+            return self.split_dates.get('val_start'), self.split_dates.get('val_end')
+        elif self.split == 'test':
+            return self.split_dates.get('test_start'), self.split_dates.get('test_end')
+        else:
+            return None, None
 
     def __len__(self):
+        """Return the number of samples in the dataset."""
         return len(self.X)
 
     def __getitem__(self, idx):
-        return (self.X[idx], 
-               self.y_cls_1[idx], self.y_reg_1[idx],
-               self.y_cls_2[idx], self.y_reg_2[idx])
+        """Get a sample by index."""
+        return self.X[idx], self.y[idx]

@@ -3,7 +3,7 @@ Priority:
 - Implement model loading in C++ for inference (or create microservice?)
 - Create test script using PLV models.
 
-- Debug transformation saving (maybe overwriting? Check data_io functions)
+- Debug transformation saving (maybe overwriting? Check data_io functions). Maybe write to separatre files and then concat
 - Ameliorate outlier removal mechanism and see correctness of processed data.
 - Implement data augmentation techniques
 
