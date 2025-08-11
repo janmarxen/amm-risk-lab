@@ -8,15 +8,12 @@ import os
 import argparse
 import torch
 import torch.nn as nn
-import h5py
-import numpy as np
-import pandas as pd
-from datetime import datetime
 from pathlib import Path
+import json
 
 from python.ml.PLV.data_io import LPsDataset, fit_scalers
 from python.ml.PLV.model import ZeroInflatedTransformer
-from python.utils.distributed_utils import load_model_arch0, save_model_arch0, load_scalers, save_scalers0
+from python.utils.distributed_utils import save_model_arch0, save_scalers0
 
 def enhanced_finetune(model, train_loader, val_loader, epochs=50, base_lr=0.0001, 
                      warmup_epochs=5, verbose=True):
@@ -131,7 +128,9 @@ def main(args):
     print(f"Validation Period: {val_start} to {val_end}")
     
     # Load saved architecture to determine features
-    arch = load_model_arch0(model_path)
+    arch_path = os.path.splitext(model_path)[0] + '_arch.json'
+    with open(arch_path, 'r') as f:
+        arch = json.load(f)
     features = arch['features']
     targets = arch['targets']
     
@@ -142,17 +141,25 @@ def main(args):
         pool_addresses=[finetune_pool_address],
         features=features,
         targets=targets,
-        fraction=0.1  # Use 10% for scaler fitting
+        sample_size_pct=1.0  # Use 100% for scaler fitting
     )
     
     # Create datasets
+    split_dates = {
+        'train_start': train_start,
+        'train_end': train_end,
+        'val_start': val_start,
+        'val_end': val_end
+    }
+    
     train_dataset = LPsDataset(
         hdf5_path=hdf5_path,
         pool_addresses=[finetune_pool_address],
         features=features,
         targets=targets,
-        start_date=train_start,
-        end_date=train_end,
+        n_lags=arch.get('n_lags', 5),
+        split='train',
+        split_dates=split_dates,
         feature_scaler=feature_scaler,
         target_reg_scalers=target_reg_scalers
     )
@@ -162,8 +169,9 @@ def main(args):
         pool_addresses=[finetune_pool_address],
         features=features,
         targets=targets,
-        start_date=val_start,
-        end_date=val_end,
+        n_lags=arch.get('n_lags', 5),
+        split='val',
+        split_dates=split_dates,
         feature_scaler=feature_scaler,
         target_reg_scalers=target_reg_scalers
     )

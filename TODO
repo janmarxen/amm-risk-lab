@@ -3,9 +3,7 @@ Priority:
 - Implement model loading in C++ for inference (or create microservice?)
 - Create test script using PLV models.
 
-- Debug transformation saving (maybe overwriting? Check data_io functions). Maybe write to separatre files and then concat
 - Ameliorate outlier removal mechanism and see correctness of processed data.
-- Implement data augmentation techniques
 
 - Backtest LP simulation against real-data
 - Distribute LP strategy simulation with CUDA. 
@@ -14,3 +12,4 @@ Priority:
 
 Non-Priority:
 - Create Reinforcement Learning Bot ()
+- Create frontend with Lovable and see FastAI lesson 2 for deployment

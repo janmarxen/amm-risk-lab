@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=gridsearch_test
-#SBATCH --nodes=1
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=4        
 #SBATCH --gres=gpu:4              
 #SBATCH --cpus-per-task=8           
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=00:20:00             
+#SBATCH --time=03:00:00             
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
 ##SBATCH --output=/dev/null
@@ -39,10 +39,33 @@ mkdir -p /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_l
 
 ### Configuration ###
 HDF5_PATH="/p/scratch/training2529/uniswap_pools_data_transformed.h5"
-N_POOLS=5  # Reduced for testing
+N_POOLS=500  # Reduced for testing
 MODEL_NAME="transformer_model_gs"
 # Simplified feature set for testing
-FEATURES="price_return,liquidity_return,volume_return,price_volatility_3h,liquidity_volatility_3h,volume_volatility_3h"
+FEATURES="price_return,\
+price_volatility_3h,price_volatility_6h,price_volatility_24h,\
+liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,\
+volume_volatility_3h,volume_volatility_6h,volume_volatility_24h,\
+price_ma_3h,price_ma_6h,price_ma_24h,\
+liquidity_ma_3h,liquidity_ma_6h,liquidity_ma_24h,\
+volume_ma_3h,volume_ma_6h,volume_ma_24h,\
+price_volume_corr_6h,price_volume_corr_24h,price_liquidity_corr_6h,\
+volume_liquidity_return_ratio,volume_liquidity_ratio_ma_6h,volume_liquidity_ratio_volatility,\
+price_volatility_to_volume_ratio,liquidity_return_depth_proxy,market_impact_proxy,price_efficiency,\
+price_momentum_3h,price_momentum_12h,price_momentum_24h,\
+liquidity_momentum_6h,liquidity_momentum_24h,\
+volume_momentum_6h,volume_momentum_24h,\
+price_deviation_from_ma_6h,price_deviation_from_ma_24h,liquidity_deviation_from_ma_6h,\
+high_vol_regime_3h,high_vol_regime_24h,vol_cluster_indicator,vol_term_structure,\
+liquidity_return_concentration,liquidity_return_percentile_6h,liquidity_return_percentile_24h,\
+liquidity_stress,liquidity_abundance,liquidity_stability,\
+hour,day_of_week,month,season,\
+hour_sin,hour_cos,day_sin,day_cos,\
+us_market_hours,asia_market_hours,weekend,\
+price_rsi_6h,price_rsi_24h,liquidity_rsi_6h,volume_rsi_6h,\
+price_bb_upper_6h,price_bb_lower_6h,price_bb_position,\
+price_shock_3h,price_shock_6h,volume_spike,volume_drought,\
+liquidity_drain,liquidity_injection"
 TARGETS="liquidity_return,volume_return"
 
 # Smaller time range for testing
@@ -53,16 +76,15 @@ VAL_END="2025-06-01"
 TEST_START="2025-06-02"
 TEST_END="2025-07-01"
 
-# Simplified grid for testing (Total combinations: 2×1×2×2×1×1×1 = 8)
-N_LAGS_LIST="3,5"                        # 2 values
-BATCH_SIZE_LIST="32"                      # 1 value  
-D_MODEL_LIST="32,64"                      # 2 values
+N_LAGS_LIST="5,8,10"                        # 2 values
+BATCH_SIZE_LIST="1024,2048"                      # 1 value  
+D_MODEL_LIST="16,32"                      # 2 values
 NUM_HEADS_LIST="2,4"                      # 2 values
-NUM_LAYERS_LIST="2"                       # 1 value
-DENSE_UNITS_LIST="32"                     # 1 value
-DROPOUT_LIST="0.1"                        # 1 value
+NUM_LAYERS_LIST="2,3"                       # 1 value
+DENSE_UNITS_LIST="16,32,64"                     # 1 value
+DROPOUT_LIST="0.3,0.4"                        # 1 value
 LR_LIST="0.001"                           # 1 value
-EPOCHS_LIST="1"                           # 1 epoch for testing
+EPOCHS_LIST="50"                           # 1 epoch for testing
 
 # Launch one Python process per task (per GPU)
 srun --cpu_bind=none \

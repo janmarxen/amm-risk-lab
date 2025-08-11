@@ -55,15 +55,11 @@ python python/ml/PLV/scripts/run_enhanced_finetuning.py \
     --train_end $TRAIN_END \
     --val_start $VAL_START \
     --val_end $VAL_END \
-    --test_start $TEST_START \
-    --test_end $TEST_END \
     --finetune_pool_address $FINETUNE_POOL_ADDRESS \
-    --finetune_epochs $FINETUNE_EPOCHS \
-    --finetune_lr $FINETUNE_LR \
-    --finetune_batch_size $FINETUNE_BATCH_SIZE \
+    --epochs $FINETUNE_EPOCHS \
+    --lr $FINETUNE_LR \
+    --batch_size $FINETUNE_BATCH_SIZE \
     --pretrained_model_name $PRETRAINED_MODEL \
-    --finetuned_model_name $FINETUNED_MODEL \
-    --hdf5_path $HDF5_PATH \
-    --seed 42
+    --hdf5_path $HDF5_PATH
 
 echo "=== Enhanced Finetuning Complete ==="

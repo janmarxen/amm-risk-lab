@@ -28,7 +28,6 @@ from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
 from python.ml.PLV.model import ZeroInflatedTransformer
 from python.utils.distributed_utils import save_gridsearch_result
 import itertools
-import json
 
 def main(args):
 
@@ -136,8 +135,8 @@ def main(args):
         print('Model training complete.')
         
         # Evaluate on pretraining validation data for grid search results
-        val_loss = model.evaluate(val_loader)
-        print(f"Validation loss on pretraining pools: {val_loss:.8f}")
+        val_loss = model.evaluate(val_loader)/batch_size
+        print(f"Normalized validation loss on pretraining pools: {val_loss:.8f}")
         result = {
             'combination_id': i,
             'gpu_rank': local_rank,
