@@ -13,9 +13,6 @@ High-level steps:
 7. Train the model using distributed data loaders (no DistributedSampler needed).
 8. Save the trained model (only on rank 0).
 9. Clean up and destroy the process group.
-
-Note: Dataset sharding ensures each process works on completely different pools,
-maximizing data parallelism efficiency without overlap.
 """
 
 import os
@@ -91,7 +88,7 @@ def main(args):
         end_idx = start_idx + pools_per_process
     
     process_pool_addresses = pool_addresses[start_idx:end_idx]
-    print0(f"Process {rank}: Using pools {start_idx}-{end_idx-1} ({len(process_pool_addresses)} pools)")
+    print(f"Process {rank}: Using pools {start_idx}-{end_idx-1} ({len(process_pool_addresses)} pools)")
     
     # Create datasets - standard dataset with per-process pool sharding
     train_dataset = LPsDataset(
@@ -137,7 +134,7 @@ def main(args):
     
     # Create DataLoaders - standard dataset with dataset-level sharding (no DistributedSampler)
     num_workers = int(os.getenv('SLURM_CPUS_PER_TASK', 4))
-    print0("Creating DataLoaders for standard Dataset with dataset-level sharding (no DistributedSampler)")
+    print0("Creating DataLoaders for standard Dataset with dataset-level sharding...")
     
     train_loader = DataLoader(
         train_dataset,

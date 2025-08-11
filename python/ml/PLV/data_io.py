@@ -366,11 +366,13 @@ class LPsDataset(Dataset):
         hdf5_path: str,
         pool_addresses: List[str] = None,
         features: List[str] = None,
-        targets: List[str] = None,        n_lags: int = 1,
+        targets: List[str] = None,        
+        n_lags: int = 1,
         split: str = 'train',
         split_dates: dict = None,
         feature_scaler=None,
-        target_reg_scalers=None,        verbose: int = 0,
+        target_reg_scalers=None,        
+        verbose: int = 0,
         num_workers: int = 16
     ):
         """
@@ -411,7 +413,10 @@ class LPsDataset(Dataset):
             print(f"[LPsDataset] Loading {len(pool_addresses)} pools into memory...")
         
         self.X = []
-        self.y = []
+        self.y_cls_1 = []
+        self.y_reg_1 = []
+        self.y_cls_2 = []
+        self.y_reg_2 = []
         self._load_all_data(num_workers)
         
         if verbose:
@@ -433,37 +438,69 @@ class LPsDataset(Dataset):
                 # Drop missing values
                 df = df.dropna(subset=self.features + self.targets)
                 if df.empty:
-                    return [], []
+                    return [], [], [], [], []
+                
+                # Apply scaling before creating lags
+                if self.feature_scaler is not None:
+                    # Use provided scalers
+                    df[self.features] = self.feature_scaler.transform(df[self.features])
+                    if self.target_reg_scalers[0] is not None:
+                        df[[self.targets[0]]] = self.target_reg_scalers[0].transform(df[[self.targets[0]]])
+                    if self.target_reg_scalers[1] is not None:
+                        df[[self.targets[1]]] = self.target_reg_scalers[1].transform(df[[self.targets[1]]])
+                else:
+                    # Create temporary scalers and fit_transform
+                    temp_feature_scaler = StandardScaler()
+                    df[self.features] = temp_feature_scaler.fit_transform(df[self.features])
+                    
+                    temp_target_scaler_1 = StandardScaler()
+                    df[[self.targets[0]]] = temp_target_scaler_1.fit_transform(df[[self.targets[0]]])
+                    
+                    temp_target_scaler_2 = StandardScaler()
+                    df[[self.targets[1]]] = temp_target_scaler_2.fit_transform(df[[self.targets[1]]])
                 
                 # Get sequences with lags
-                X, y = get_X_y(
+                X, y_cls_1, y_reg_1, y_cls_2, y_reg_2 = get_X_y(
                     df=df,
                     features=self.features,
-                    targets=self.targets,
-                    n_lags=self.n_lags,
-                    feature_scaler=self.feature_scaler,
-                    target_reg_scalers=self.target_reg_scalers
+                    target_cols=self.targets,
+                    n_lags=self.n_lags
                 )
                 
-                if X is None or y is None:
-                    return [], []
+                if X is None or len(X) == 0:
+                    return [], [], [], [], []
                 
-                return X, y
+                return X, y_cls_1, y_reg_1, y_cls_2, y_reg_2
                 
             except Exception as e:
                 if self.verbose:
                     print(f"Warning: Could not load pool {pool_addr}: {e}")
-                return [], []
+                return [], [], [], [], []
         
         # Load pools in parallel
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = [executor.submit(load_pool, addr) for addr in self.pool_addresses]
             
             for i, future in enumerate(futures, 1):
-                X_pool, y_pool = future.result()
+                X_pool, y_cls_1_pool, y_reg_1_pool, y_cls_2_pool, y_reg_2_pool = future.result()
                 if len(X_pool) > 0:
+                    # Convert to lists if they're arrays
+                    if isinstance(X_pool, np.ndarray):
+                        X_pool = X_pool.tolist()
+                    if isinstance(y_cls_1_pool, np.ndarray):
+                        y_cls_1_pool = y_cls_1_pool.tolist()
+                    if isinstance(y_reg_1_pool, np.ndarray):
+                        y_reg_1_pool = y_reg_1_pool.tolist()
+                    if isinstance(y_cls_2_pool, np.ndarray):
+                        y_cls_2_pool = y_cls_2_pool.tolist()
+                    if isinstance(y_reg_2_pool, np.ndarray):
+                        y_reg_2_pool = y_reg_2_pool.tolist()
+                    
                     self.X.extend(X_pool)
-                    self.y.extend(y_pool)
+                    self.y_cls_1.extend(y_cls_1_pool)
+                    self.y_reg_1.extend(y_reg_1_pool)
+                    self.y_cls_2.extend(y_cls_2_pool)
+                    self.y_reg_2.extend(y_reg_2_pool)
                 
                 if self.verbose and i % 100 == 0:
                     print(f"[LPsDataset] Processed {i}/{len(self.pool_addresses)} pools, {len(self.X)} samples so far")
@@ -471,12 +508,18 @@ class LPsDataset(Dataset):
         # Convert to tensors
         if len(self.X) > 0:
             self.X = torch.FloatTensor(np.array(self.X))
-            self.y = torch.FloatTensor(np.array(self.y))
+            self.y_cls_1 = torch.FloatTensor(np.array(self.y_cls_1))
+            self.y_reg_1 = torch.FloatTensor(np.array(self.y_reg_1))
+            self.y_cls_2 = torch.FloatTensor(np.array(self.y_cls_2))
+            self.y_reg_2 = torch.FloatTensor(np.array(self.y_reg_2))
         else:
             # Empty dataset fallback
-            input_size = len(self.features) + len(self.targets)
+            input_size = len(self.features)
             self.X = torch.zeros(0, self.n_lags, input_size)
-            self.y = torch.zeros(0, len(self.targets))
+            self.y_cls_1 = torch.zeros(0)
+            self.y_reg_1 = torch.zeros(0)
+            self.y_cls_2 = torch.zeros(0)
+            self.y_reg_2 = torch.zeros(0)
 
     def _get_split_dates(self):
         """Get start and end dates for the current split."""
@@ -498,4 +541,4 @@ class LPsDataset(Dataset):
 
     def __getitem__(self, idx):
         """Get a sample by index."""
-        return self.X[idx], self.y[idx]
+        return self.X[idx], self.y_cls_1[idx], self.y_reg_1[idx], self.y_cls_2[idx], self.y_reg_2[idx]
