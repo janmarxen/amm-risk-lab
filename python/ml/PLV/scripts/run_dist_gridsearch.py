@@ -25,14 +25,14 @@ from random import shuffle
 import random
 import sys
 from python.ml.PLV.data_io import LPsDataset, get_saved_pool_addresses
-from python.ml.PLV.model import ZeroInflatedLSTM, ZeroInflatedTransformer
+from python.ml.PLV.model import ZeroInflatedTransformer
 from python.utils.distributed_utils import save_gridsearch_result
 import itertools
 import json
 
 def main(args):
 
-    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data.h5")
+    hdf5_path = args.hdf5_path
     model_dir = args.result_dir if args.result_dir is not None else os.path.join("/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models")
 
     if args.features is not None:
@@ -90,7 +90,7 @@ def main(args):
         dense_units = param_dict["dense_units"]
         lr = param_dict["lr"]
         epochs = param_dict["epochs"]
-        model_kwargs = dict(input_size=len(features)*len(targets)+len(targets), n_lags=n_lags, dense_units=dense_units)
+        model_kwargs = dict(input_size=len(features)+len(targets), n_lags=n_lags, dense_units=dense_units)
         model_kwargs["d_model"] = param_dict["d_model"]
         model_kwargs["num_heads"] = param_dict["num_heads"]
         model_kwargs["num_layers"] = param_dict["num_layers"]
@@ -152,6 +152,7 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--hdf5_path', type=str, required=True, help='Path to HDF5 file containing pool data')
     parser.add_argument('--n_lags_list', type=str, required=True)
     parser.add_argument('--batch_size_list', type=str, required=True)
     parser.add_argument('--d_model_list', type=str, required=False)

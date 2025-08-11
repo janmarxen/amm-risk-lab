@@ -188,8 +188,7 @@ def main(args):
         dense_units=dense_units,
         dropout=args.dropout,
         features=features,
-        targets=targets,
-        multi_task=True
+        targets=targets
     )
     destroy_process_group()
 

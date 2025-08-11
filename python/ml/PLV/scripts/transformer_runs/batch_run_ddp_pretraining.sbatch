@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=00:40:00
+#SBATCH --time=01:00:00
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
 
@@ -40,12 +40,12 @@ INPUT_HDF5="/p/scratch/training2529/uniswap_pools_data_transformed.h5"
 
 MODEL_NAME="transformer_pretrained"
 N_LAGS=8       
-# BATCH_SIZE=1024 
-BATCH_SIZE=2048 
-D_MODEL=64      
+BATCH_SIZE=1024 
+# BATCH_SIZE=2048 
+D_MODEL=32      
 NUM_HEADS=4     
-NUM_LAYERS=3    
-DENSE_UNITS=64  
+NUM_LAYERS=2    
+DENSE_UNITS=32  
 DROPOUT=0.4     
 LR=0.001        
 EPOCHS=200        

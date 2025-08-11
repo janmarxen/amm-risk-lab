@@ -6,9 +6,10 @@ export PYTHONPATH=/p/project1/training2529/marxen1/amm-risk-lab:$PYTHONPATH
 set -e
 
 ### Configuration ###
+HDF5_PATH="/p/scratch/training2529/uniswap_pools_data_transformed.h5"
 POOL_ADDRESS="0xcbcdf9626bc03e24f779434178a73a0b4bad62ed"
-# MODEL_NAME="transformer_liquidity_finetuned_1_${POOL_ADDRESS}"
-MODEL_NAME="transformer_liquidity_pretrained_1"
+MODEL_NAME="transformer_finetuned_${POOL_ADDRESS}"
+# MODEL_NAME="transformer_pretrained"
 
 TRAIN_START="2023-01-01"
 TRAIN_END="2025-05-01"
@@ -26,5 +27,6 @@ python python/ml/PLV/scripts/run_testing.py \
     --val_end $VAL_END \
     --test_start $TEST_START \
     --test_end $TEST_END \
+    --hdf5_path $HDF5_PATH \
     --pool_address $POOL_ADDRESS \
     --model_name $MODEL_NAME

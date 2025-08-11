@@ -151,6 +151,7 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         best_state = None
         patience_counter = 0
         for epoch in range(epochs):
+            epoch_start_time = time.time()
             self.train()
             total_loss = 0
             for batch in train_loader:
@@ -181,8 +182,11 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
                     patience_counter = 0
                 else:
                     patience_counter += 1
+
+                epoch_time = time.time() - epoch_start_time
                 if verbose:
-                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_loader.dataset):.12f}, Val Loss: {val_loss:.12f}")
+                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_loader.dataset):.12f}, Val Loss: {val_loss:.12f}, Time: {epoch_time:.2f}s")
+
                 if patience_counter >= early_stopping_patience:
                     if verbose:
                         print(f"Early stopping at epoch {epoch+1}. Best Val Loss: {best_val_loss:.12f}")
@@ -190,8 +194,9 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
                         self.load_state_dict(best_state)
                     break
             else:
+                epoch_time = time.time() - epoch_start_time
                 if verbose and (epoch % 5 == 0 or epoch == epochs-1):
-                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_loader.dataset):.12f}")
+                    print(f"Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(train_loader.dataset):.12f}, Time: {epoch_time:.2f}s")
         # Restore best weights if early stopping was used
         if val_loader is not None and best_state is not None:
             self.load_state_dict(best_state)

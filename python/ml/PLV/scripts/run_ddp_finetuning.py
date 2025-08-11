@@ -43,7 +43,7 @@ def main(args):
     finetune_pool_address = args.finetune_pool_address
     pretrained_model_name = args.pretrained_model_name
     finetuned_model_name = args.finetuned_model_name
-    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data_2.h5")
+    hdf5_path = args.hdf5_path
     model_path = os.path.join("python/ml/PLV/models", f"{pretrained_model_name}.pt")
     finetuned_model_path = os.path.join("python/ml/PLV/models", f"{finetuned_model_name}.pt")
 
@@ -166,6 +166,7 @@ def parse_args():
         parser.add_argument('--seed', type=int, default=42, help='Random seed')
         parser.add_argument('--pretrained_model_name', type=str, required=True, help='Name of the pretrained model file')
         parser.add_argument('--finetuned_model_name', type=str, required=True, help='Name of the finetuned model file')
+        parser.add_argument('--hdf5_path', type=str, required=True, help='Path to the HDF5 data file')
         return parser.parse_args()
 
 if __name__ == "__main__":

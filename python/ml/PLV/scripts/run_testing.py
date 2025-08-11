@@ -69,7 +69,7 @@ def main(args):
 
     pool_address = args.pool_address
     model_name = args.model_name
-    hdf5_path = os.path.join("/p/scratch/training2529", "uniswap_pools_data.h5")
+    hdf5_path = args.hdf5_path
     model_path = os.path.join("python/ml/PLV/models", f"{model_name}.pt")
     arch_path = os.path.splitext(model_path)[0] + '_arch.json'
     with open(arch_path, 'r') as f:
@@ -86,8 +86,8 @@ def main(args):
     }
     # --- Prepare test dataset ---
     # Load scalers
-    # scaler_path = os.path.splitext(model_path)[0] + '_scalers.pkl'
-    scaler_path = 'python/ml/PLV/models/transformer_multi_task_finetuned_1_0xcbcdf9626bc03e24f779434178a73a0b4bad62ed_scalers.pkl'
+    scaler_path = os.path.splitext(model_path)[0] + '_scalers.pkl'
+    # scaler_path = 'python/ml/PLV/models/transformer_finetuned_0xcbcdf9626bc03e24f779434178a73a0b4bad62ed_scalers.pkl'
     feature_scaler, target_reg_scalers = load_scalers(scaler_path)
     print("Preparing test dataset...")
     test_dataset = LPsDataset(
@@ -105,9 +105,8 @@ def main(args):
     if len(test_dataset) == 0:
         print("No test data available.")
         return
-    # --- Load model ---
     print("Loading model...")
-    input_size = len(features) * len(targets) + len(targets)  # Multi-task input size
+    input_size = len(features) + len(targets)  # Correct input size: features + target lags
     model = ZeroInflatedTransformer(
         input_size=input_size,
         n_lags=arch['n_lags'],
@@ -194,6 +193,7 @@ def parse_args():
     parser.add_argument('--test_start', type=str, required=True)
     parser.add_argument('--test_end', type=str, required=True)
     parser.add_argument('--model_name', type=str, required=True)
+    parser.add_argument('--hdf5_path', type=str, required=True)
     parser.add_argument('--pool_address', type=str, required=True)
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     return parser.parse_args()
