@@ -3,12 +3,14 @@ import torch
 import torch.nn as nn
 import torch.distributed as dist
 import time
+import numpy as np
 
 class ZeroInflatedTSModule(nn.Module, abc.ABC):
     """
     Abstract base class for zero-inflated time series models.
     Provides common scaling, training, evaluation, and prediction utilities for time series models
-    with both classification and regression heads. Multi-task architecture for 2 targets.
+    with hybrid architecture: Task 1 (liquidity_return) uses zero-inflated, Task 2 (volume_return) uses standard regression.
+    Multi-task architecture for 2 targets with different modeling approaches.
     """
 
     def fit_distributed(self, train_loader, epochs=20, lr=0.001, verbose=1, val_loader=None, early_stopping_patience=10, device=None):
@@ -226,7 +228,7 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         
         # Task 1 loss
         bce_1 = nn.BCELoss()(cls_pred_1, y_cls_1)
-        mask_1 = (y_cls_1 == 0).float()
+        mask_1 = (y_cls_1 == 1).float()  # Apply regression to ZERO class (y_cls_1 == 1)
         if mask_1.sum() > 0:
             mse_1 = ((reg_pred_1.squeeze() - y_reg_1.squeeze()) ** 2 * mask_1).sum() / (mask_1.sum() + 1e-6)
         else:
@@ -235,13 +237,58 @@ class ZeroInflatedTSModule(nn.Module, abc.ABC):
         
         # Task 2 loss
         bce_2 = nn.BCELoss()(cls_pred_2, y_cls_2)
-        mask_2 = (y_cls_2 == 0).float()
+        mask_2 = (y_cls_2 == 1).float()  # Apply regression to ZERO class (y_cls_2 == 1)
         if mask_2.sum() > 0:
             mse_2 = ((reg_pred_2.squeeze() - y_reg_2.squeeze()) ** 2 * mask_2).sum() / (mask_2.sum() + 1e-6)
         else:
             mse_2 = torch.tensor(0.0, device=reg_pred_2.device)
         task_2_loss = bce_2 + mse_2
         
+        total_loss = task_weights[0] * task_1_loss + task_weights[1] * task_2_loss
+        return total_loss
+
+    @staticmethod
+    def custom_hybrid_loss(cls_pred_1, reg_pred_1, y_cls_1, y_reg_1, reg_pred_2, y_reg_2, task_weights=None):
+        """
+        Custom hybrid loss function for multi-task learning:
+        - Task 1 (liquidity_return): Zero-inflated loss (classification + regression)
+        - Task 2 (volume_return): Standard MSE regression loss
+        
+        Args:
+            cls_pred_1: Classification predictions for task 1 (batch_size, 1)
+            reg_pred_1: Regression predictions for task 1 (batch_size, 1)
+            y_cls_1: True classification labels for task 1 (batch_size, 1)
+            y_reg_1: True regression targets for task 1 (batch_size, 1)
+            reg_pred_2: Regression predictions for task 2 (batch_size, 1)
+            y_reg_2: True regression targets for task 2 (batch_size, 1)
+            task_weights: Optional weights for each task [weight_1, weight_2]
+        
+        Returns:
+            torch.Tensor: Combined loss
+        """
+        if task_weights is None:
+            task_weights = [1.0, 1.0]
+        
+        # Task 1: Zero-inflated loss (classification + regression)
+        bce_loss = nn.BCELoss()
+        
+        # Classification loss for task 1 (predicting P(target == 0))
+        cls_loss_1 = bce_loss(cls_pred_1, y_cls_1)
+        
+        # Regression loss for task 1 (only on zero class samples where y_cls_1 == 1)
+        mask_1 = (y_cls_1 == 1).float()  # Apply regression to ZERO class (y_cls_1 == 1)
+        if mask_1.sum() > 0:
+            mse_1 = ((reg_pred_1.squeeze() - y_reg_1.squeeze()) ** 2 * mask_1).sum() / (mask_1.sum() + 1e-6)
+        else:
+            mse_1 = torch.tensor(0.0, device=cls_pred_1.device)
+        
+        # Combined loss for task 1
+        task_1_loss = cls_loss_1 + mse_1
+        
+        # Task 2: Standard MSE regression loss
+        task_2_loss = nn.MSELoss()(reg_pred_2, y_reg_2)
+        
+        # Weighted combination
         total_loss = task_weights[0] * task_1_loss + task_weights[1] * task_2_loss
         return total_loss
 
@@ -362,4 +409,90 @@ class ZeroInflatedTransformer(ZeroInflatedTSModule):
         reg_out_2 = self.regressor_2(reg_x_2)
         
         return cls_out_1, reg_out_1, cls_out_2, reg_out_2
+
+
+class HybridTransformer(ZeroInflatedTSModule):
+    """
+    Hybrid transformer for multi-task learning:
+    - Task 1 (liquidity_return): Zero-inflated (classification + regression)
+    - Task 2 (volume_return): Standard regression only
+    
+    Args:
+        input_size (int): Number of input features.
+        n_lags (int): Number of lag steps.
+        d_model (int): Transformer model dimension.
+        num_heads (int): Number of attention heads.
+        num_layers (int): Number of transformer layers.
+        dense_units (int): Number of units in shared dense layer.
+        dropout (float): Dropout rate.
+    """
+    def __init__(self, input_size, n_lags=1, d_model=32, num_heads=2, num_layers=2, dense_units=16, dropout=0.1):
+        super().__init__()
+        self.input_size = input_size
+        self.n_lags = n_lags
+        self.d_model = d_model
+        
+        # Shared layers
+        self.pos_encoder = nn.Parameter(torch.zeros(1, n_lags, d_model))
+        self.input_proj = nn.Linear(input_size, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=num_heads, dim_feedforward=d_model*2, dropout=dropout, batch_first=True, norm_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.shared_dense = nn.Linear(d_model, dense_units)
+        
+        # Task 1 heads (zero-inflated)
+        self.classifier_1 = nn.Linear(dense_units, 1)
+        self.regressor_dense_1 = nn.Linear(dense_units, dense_units)
+        self.regressor_1 = nn.Linear(dense_units, 1)
+        
+        # Task 2 heads (standard regression only)
+        self.regressor_dense_2 = nn.Linear(dense_units, dense_units)
+        self.regressor_2 = nn.Linear(dense_units, 1)
+        
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # x: [batch, seq_len, input_size]
+        x = self.input_proj(x) + self.pos_encoder[:, :x.size(1), :]
+        x = self.transformer_encoder(x)
+        x = x[:, -1, :]  # Use last token
+        shared_repr = self.relu(self.shared_dense(x))
+        
+        # Task 1 outputs (zero-inflated)
+        cls_out_1 = self.sigmoid(self.classifier_1(shared_repr))
+        reg_x_1 = self.relu(self.regressor_dense_1(shared_repr))
+        reg_out_1 = self.regressor_1(reg_x_1)
+        
+        # Task 2 outputs (standard regression)
+        reg_x_2 = self.relu(self.regressor_dense_2(shared_repr))
+        reg_out_2 = self.regressor_2(reg_x_2)
+        
+        return cls_out_1, reg_out_1, reg_out_2
+
+    def predict(self, X):
+        """
+        Predict outputs for input X for both tasks.
+        Task 1: Zero-inflated (regression and classification)
+        Task 2: Standard regression only
+        
+        Args:
+            X: Input tensor or ndarray of shape (n_samples, n_lags, n_features).
+        Returns:
+            tuple: (reg_pred_1, cls_pred_1, reg_pred_2) for both tasks
+        """
+        device = next(self.parameters()).device
+        self.eval()
+        with torch.no_grad():
+            if isinstance(X, np.ndarray):
+                X_tensor = torch.FloatTensor(X).to(device)
+            else:
+                X_tensor = X.to(device)
+            cls_pred_1, reg_pred_1, reg_pred_2 = self(X_tensor)
+            
+            # Convert to numpy and apply thresholds
+            cls_pred_1 = (cls_pred_1.cpu().numpy().flatten() > 0.5).astype(int)
+            reg_pred_1 = reg_pred_1.cpu().numpy().flatten()
+            reg_pred_2 = reg_pred_2.cpu().numpy().flatten()
+            
+        return reg_pred_1, cls_pred_1, reg_pred_2
 

@@ -3,13 +3,12 @@ Priority:
 - Implement model loading in C++ for inference (or create microservice?)
 - Create test script using PLV models.
 
-- Ameliorate outlier removal mechanism and see correctness of processed data.
-
 - Backtest LP simulation against real-data
-- Distribute LP strategy simulation with CUDA. 
+- Distribute LP strategy simulation with CUDA. Or stick to CPU for web computing. 
 - Make the simulations Gas fee aware.
 
 
 Non-Priority:
 - Create Reinforcement Learning Bot ()
 - Create frontend with Lovable and see FastAI lesson 2 for deployment
+- Ameliorate outlier removal mechanism and see correctness of processed data.

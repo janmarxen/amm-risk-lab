@@ -57,8 +57,8 @@ def main(args):
     split_dates = {
         'train_start': args.train_start,
         'train_end': args.train_end,
-        'val_start': args.val_start,
-        'val_end': args.val_end,
+        'val_start': args.val_start if args.use_validation else None,
+        'val_end': args.val_end if args.use_validation else None,
         'test_start': args.test_start,
         'test_end': args.test_end
     }
@@ -102,20 +102,23 @@ def main(args):
         verbose=1 if rank == 0 else 0
     )
     
-    val_dataset = LPsDataset(
-        hdf5_path=hdf5_path,
-        pool_addresses=process_pool_addresses,
-        features=features,
-        targets=targets,
-        split_dates=split_dates,
-        split='val',
-        n_lags=n_lags,
-        verbose=1 if rank == 0 else 0
-    )
+    val_dataset = None
+    local_val_samples = 0
+    if args.use_validation:
+        val_dataset = LPsDataset(
+            hdf5_path=hdf5_path,
+            pool_addresses=process_pool_addresses,
+            features=features,
+            targets=targets,
+            split_dates=split_dates,
+            split='val',
+            n_lags=n_lags,
+            verbose=1 if rank == 0 else 0
+        )
+        local_val_samples = len(val_dataset)
     
     # Print dataset info - gather statistics from sharded datasets
     local_train_samples = len(train_dataset)
-    local_val_samples = len(val_dataset)
     
     # Use atomic_print to show per-process statistics
     from python.utils.distributed_utils import atomic_print
@@ -128,9 +131,13 @@ def main(args):
     torch.distributed.all_reduce(total_val_samples, op=torch.distributed.ReduceOp.SUM)
     
     print0(f"Total training samples across all processes: {total_train_samples.item()}")
-    print0(f"Total validation samples across all processes: {total_val_samples.item()}")
+    if args.use_validation:
+        print0(f"Total validation samples across all processes: {total_val_samples.item()}")
+    else:
+        print0("Validation disabled - training without early stopping")
     print0(f"Total number of pools across all processes: {len(pool_addresses)}")
     print0(f"Number of features: {len(features)}")
+    print0(f"Using validation: {args.use_validation}")
     
     # Create DataLoaders - standard dataset with dataset-level sharding (no DistributedSampler)
     num_workers = int(os.getenv('SLURM_CPUS_PER_TASK', 4))
@@ -144,14 +151,17 @@ def main(args):
         pin_memory=True,
         drop_last=True
     )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,  # No shuffling for validation
-        num_workers=num_workers,
-        pin_memory=True,
-        drop_last=False
-    )
+    
+    val_loader = None
+    if args.use_validation:
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,  # No shuffling for validation
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=False
+        )
 
     # Calculate input size: features + target lags (2 targets)
     input_size = len(features) + len(targets)
@@ -166,13 +176,17 @@ def main(args):
     )
     model = model.to(device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+    
+    # Configure training parameters based on validation usage
+    early_stopping_patience = 20 if args.use_validation else None
+    
     model.module.fit_distributed(
         train_loader=train_loader,
         epochs=epochs,
         lr=lr,
         verbose=1 if rank == 0 else 0,
         val_loader=val_loader,
-        early_stopping_patience=20,
+        early_stopping_patience=early_stopping_patience,
         device=device
     )
     print0('Training complete.')
@@ -205,10 +219,10 @@ def parse_args():
     parser.add_argument('--epochs', type=int, required=True)
     parser.add_argument('--train_start', type=str, required=True)
     parser.add_argument('--train_end', type=str, required=True)
-    parser.add_argument('--val_start', type=str, required=True)
-    parser.add_argument('--val_end', type=str, required=True)
-    parser.add_argument('--test_start', type=str, required=True)
-    parser.add_argument('--test_end', type=str, required=True)
+    parser.add_argument('--val_start', type=str, required=False, help='Validation start date (required if --use_validation is set)')
+    parser.add_argument('--val_end', type=str, required=False, help='Validation end date (required if --use_validation is set)')
+    parser.add_argument('--test_start', type=str, required=False, help='Test start date (optional)')
+    parser.add_argument('--test_end', type=str, required=False, help='Test end date (optional)')
     parser.add_argument('--model_name', type=str, required=False, default="model")
     parser.add_argument('--d_model', type=int, default=32)
     parser.add_argument('--num_heads', type=int, default=2)
@@ -218,8 +232,15 @@ def parse_args():
     parser.add_argument('--features', type=str, required=False, default=None, help='Comma-separated list of features')
     parser.add_argument('--targets', type=str, required=True, help='Comma-separated list of exactly 2 target column names')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--use_validation', action='store_true', help='Enable validation and early stopping during training')
     
-    return parser.parse_args()
+    args = parser.parse_args()
+    
+    # Validate that validation dates are provided if validation is enabled
+    if args.use_validation and (not args.val_start or not args.val_end):
+        parser.error("--val_start and --val_end are required when --use_validation is set")
+    
+    return args
 
 if __name__ == "__main__":
     args = parse_args()

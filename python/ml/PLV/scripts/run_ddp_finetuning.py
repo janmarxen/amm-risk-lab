@@ -38,6 +38,7 @@ def main(args):
     print0("[run_ddp_finetuning.py] Configuration:")
     for k, v in vars(args).items():
         print0(f"  {k}: {v}")
+    print0(f"Using validation: {args.use_validation}")
     sys.stdout.flush()
 
     finetune_pool_address = args.finetune_pool_address
@@ -57,8 +58,8 @@ def main(args):
     split_dates = {
         'train_start': args.train_start,
         'train_end': args.train_end,
-        'val_start': args.val_start,
-        'val_end': args.val_end,
+        'val_start': args.val_start if args.use_validation else None,
+        'val_end': args.val_end if args.use_validation else None,
         'test_start': args.test_start,
         'test_end': args.test_end
     }
@@ -113,24 +114,32 @@ def main(args):
         target_reg_scalers=target_reg_scalers,
         verbose=1
     )
-    finetune_val_dataset = LPsDataset(
-        hdf5_path=hdf5_path,
-        pool_addresses=[finetune_pool_address],
-        features=features,
-        targets=targets,
-        n_lags=arch['n_lags'],
-        split='val',
-        split_dates=split_dates,
-        feature_scaler=feature_scaler,
-        target_reg_scalers=target_reg_scalers,
-        verbose=1
-    )
+    
+    finetune_val_dataset = None
+    finetune_val_loader = None
+    if args.use_validation:
+        finetune_val_dataset = LPsDataset(
+            hdf5_path=hdf5_path,
+            pool_addresses=[finetune_pool_address],
+            features=features,
+            targets=targets,
+            n_lags=arch['n_lags'],
+            split='val',
+            split_dates=split_dates,
+            feature_scaler=feature_scaler,
+            target_reg_scalers=target_reg_scalers,
+            verbose=1
+        )
+        finetune_val_loader = DataLoader(finetune_val_dataset, batch_size=args.finetune_batch_size, shuffle=False)
+    
     finetune_loader = DataLoader(finetune_dataset, batch_size=args.finetune_batch_size, shuffle=True)
-    finetune_val_loader = DataLoader(finetune_val_dataset, batch_size=args.finetune_batch_size, shuffle=False)
     if len(finetune_dataset) == 0:
         print0("No data available for finetuning on this pool.")
     else:
         print0("Starting finetuning...")
+        # Configure training parameters based on validation usage
+        early_stopping_patience = 10 if args.use_validation else None
+        
         # Finetune model
         print0("Finetuning model...")
         model.module.fit_distributed(
@@ -139,7 +148,7 @@ def main(args):
             lr=args.finetune_lr,
             verbose=1 if rank == 0 else 0,
             val_loader=finetune_val_loader,
-            early_stopping_patience=10,
+            early_stopping_patience=early_stopping_patience,
             device=device
         )
         save0(model, finetuned_model_path)
@@ -155,10 +164,10 @@ def parse_args():
         parser = argparse.ArgumentParser()
         parser.add_argument('--train_start', type=str, required=True)
         parser.add_argument('--train_end', type=str, required=True)
-        parser.add_argument('--val_start', type=str, required=True)
-        parser.add_argument('--val_end', type=str, required=True)
-        parser.add_argument('--test_start', type=str, required=True)
-        parser.add_argument('--test_end', type=str, required=True)
+        parser.add_argument('--val_start', type=str, required=False, help='Validation start date (required if --use_validation is set)')
+        parser.add_argument('--val_end', type=str, required=False, help='Validation end date (required if --use_validation is set)')
+        parser.add_argument('--test_start', type=str, required=False, help='Test start date (optional)')
+        parser.add_argument('--test_end', type=str, required=False, help='Test end date (optional)')
         parser.add_argument('--finetune_pool_address', type=str, required=True)
         parser.add_argument('--finetune_epochs', type=int, required=False, default=15)
         parser.add_argument('--finetune_lr', type=float, required=False, default=0.001)
@@ -167,7 +176,15 @@ def parse_args():
         parser.add_argument('--pretrained_model_name', type=str, required=True, help='Name of the pretrained model file')
         parser.add_argument('--finetuned_model_name', type=str, required=True, help='Name of the finetuned model file')
         parser.add_argument('--hdf5_path', type=str, required=True, help='Path to the HDF5 data file')
-        return parser.parse_args()
+        parser.add_argument('--use_validation', action='store_true', help='Enable validation and early stopping during finetuning')
+        
+        args = parser.parse_args()
+        
+        # Validate that validation dates are provided if validation is enabled
+        if args.use_validation and (not args.val_start or not args.val_end):
+            parser.error("--val_start and --val_end are required when --use_validation is set")
+        
+        return args
 
 if __name__ == "__main__":
     args = parse_args()

@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
-#SBATCH --time=01:00:00
+#SBATCH --time=02:00:00
 #SBATCH --output=%j.out
 #SBATCH --error=%j.err
 
@@ -39,16 +39,14 @@ set -e
 INPUT_HDF5="/p/scratch/training2529/uniswap_pools_data_transformed.h5"
 
 MODEL_NAME="transformer_pretrained"
-N_LAGS=8       
+N_LAGS=5       
 BATCH_SIZE=1024 
-# BATCH_SIZE=2048 
 D_MODEL=32      
 NUM_HEADS=4     
-NUM_LAYERS=2    
-DENSE_UNITS=32  
-DROPOUT=0.4     
-LR=0.001        
-EPOCHS=200        
+NUM_LAYERS=3    
+DENSE_UNITS=16  
+DROPOUT=0.3     
+LR=0.001               
 
 N_POOLS=10000
 FEATURES="price_return,\
@@ -77,12 +75,32 @@ price_shock_3h,price_shock_6h,volume_spike,volume_drought,\
 liquidity_drain,liquidity_injection"
 TARGETS="liquidity_return,volume_return"
 
+
+USE_VALIDATION=false
 TRAIN_START="2023-01-01"
-TRAIN_END="2025-05-01"
-VAL_START="2025-05-02"
-VAL_END="2025-06-01"
-TEST_START="2025-06-02"
-TEST_END="2025-07-01"
+TRAIN_END="2025-06-14"
+EPOCHS=97 
+
+# USE_VALIDATION=true
+# TRAIN_START="2023-01-01"
+# TRAIN_END="2025-05-01"
+# VAL_START="2025-05-02"
+# VAL_END="2025-06-01"
+# EPOCHS=200 
+
+echo "=== Pretraining Configuration ==="
+echo "Model: $MODEL_NAME"
+echo "N_LAGS: $N_LAGS"
+echo "Batch Size: $BATCH_SIZE"
+echo "Learning Rate: $LR"
+echo "Epochs: $EPOCHS"
+echo "Use Validation: $USE_VALIDATION"
+echo "N_POOLS: $N_POOLS"
+echo "Training Period: $TRAIN_START to $TRAIN_END"
+if [ "$USE_VALIDATION" = "true" ]; then
+    echo "Validation Period: $VAL_START to $VAL_END"
+fi
+echo "========================"
 
 # Launch a distributed training job across multiple nodes and GPUs
 srun --cpu_bind=none bash -c "torchrun_jsc \
@@ -105,12 +123,12 @@ srun --cpu_bind=none bash -c "torchrun_jsc \
     --epochs $EPOCHS \
     --train_start $TRAIN_START \
     --train_end $TRAIN_END \
-    --val_start $VAL_START \
-    --val_end $VAL_END \
+    $(if [ "$USE_VALIDATION" = "true" ]; then echo "--val_start $VAL_START --val_end $VAL_END"; fi) \
     --test_start $TEST_START \
     --test_end $TEST_END \
     --model_name $MODEL_NAME \
     --n_pools $N_POOLS \
     --features "$FEATURES" \
-    --targets "$TARGETS"
+    --targets "$TARGETS" \
+    $(if [ "$USE_VALIDATION" = "true" ]; then echo "--use_validation"; fi)
 "

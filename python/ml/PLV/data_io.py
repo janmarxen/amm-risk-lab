@@ -21,7 +21,7 @@ import concurrent.futures
 from threading import Lock
 
 from python.utils.subgraph_utils import fetch_pool_hourly_data, fetch_pools_hourly_data_batched, fetch_pools_hourly_data_batched_parallel
-from python.utils.data_utils import get_X_y, dropna_features_targets
+from python.utils.data_utils import get_X_y, get_X_y_hybrid, dropna_features_targets
 
 def write_pools_to_hdf5(
     h5f,
@@ -542,3 +542,183 @@ class LPsDataset(Dataset):
     def __getitem__(self, idx):
         """Get a sample by index."""
         return self.X[idx], self.y_cls_1[idx], self.y_reg_1[idx], self.y_cls_2[idx], self.y_reg_2[idx]
+
+
+class HybridLPsDataset(Dataset):
+    """
+    PyTorch Dataset for Hybrid Multi-task learning:
+    - Task 1 (liquidity_return): Zero-inflated (classification + regression)
+    - Task 2 (volume_return): Standard regression only
+    
+    Loads all specified pools into memory for fast access during training.
+    """
+    def __init__(
+        self,
+        hdf5_path: str,
+        pool_addresses: List[str] = None,
+        features: List[str] = None,
+        targets: List[str] = None,        
+        n_lags: int = 1,
+        split: str = 'train',
+        split_dates: dict = None,
+        feature_scaler=None,
+        target_reg_scalers=None,        
+        verbose: int = 0,
+        num_workers: int = 16
+    ):
+        """
+        Initialize HybridLPsDataset.
+        Args:
+            hdf5_path (str): Path to HDF5 file with pool data.
+            pool_addresses (List[str]): List of pool addresses to load.
+            features (List[str]): List of feature column names.
+            targets (List[str]): List of exactly 2 target column names [liquidity_return, volume_return].
+            n_lags (int): Number of time lags for sequence modeling.
+            split (str): Data split ('train', 'val', 'test').
+            split_dates (dict): Dictionary with date ranges for each split.
+            feature_scaler: Fitted feature scaler (StandardScaler).
+            target_reg_scalers: List of 2 fitted target scalers [liquidity_scaler, volume_scaler].
+            verbose (int): Verbosity level.
+            num_workers (int): Number of parallel workers.
+        """
+        self.hdf5_path = hdf5_path
+        self.pool_addresses = pool_addresses or []
+        self.features = features or []
+        self.targets = targets or []
+        self.n_lags = n_lags
+        self.split = split
+        self.split_dates = split_dates or {}
+        self.feature_scaler = feature_scaler
+        self.target_reg_scalers = target_reg_scalers if target_reg_scalers is not None else [None, None]
+        self.verbose = verbose
+        self.num_workers = num_workers
+        
+        # Initialize data containers
+        self.X = []
+        self.y_cls_1 = []  # Only for task 1 (liquidity_return)
+        self.y_reg_1 = []  # Task 1 regression
+        self.y_reg_2 = []  # Task 2 regression (volume_return)
+        
+        self._load_data()
+        
+        # Convert to tensors
+        if self.X:
+            self.X = torch.FloatTensor(np.array(self.X))
+            self.y_cls_1 = torch.FloatTensor(np.array(self.y_cls_1))
+            self.y_reg_1 = torch.FloatTensor(np.array(self.y_reg_1))
+            self.y_reg_2 = torch.FloatTensor(np.array(self.y_reg_2))
+
+    def _load_data(self):
+        """Load and process data from all pools."""
+        def process_pool(pool_address):
+            try:
+                # Load pool data
+                df = load_pool_data(self.hdf5_path, pool_address)
+                
+                # Apply date filtering
+                if self.split_dates:
+                    start_date, end_date = self._get_split_dates()
+                    if start_date and end_date and 'datetime' in df.columns:
+                        df['datetime'] = pd.to_datetime(df['datetime'])
+                        df = df[(df['datetime'] >= start_date) & (df['datetime'] <= end_date)].copy()
+                
+                if len(df) < self.n_lags + 1:
+                    return None
+                
+                # Apply scaling
+                df = df.copy()
+                if self.features:
+                    # Feature scaling
+                    if self.feature_scaler is not None:
+                        df[self.features] = self.feature_scaler.transform(df[self.features])
+                    
+                    # Target scaling
+                    if self.target_reg_scalers[0] is not None:
+                        df[[self.targets[0]]] = self.target_reg_scalers[0].transform(df[[self.targets[0]]])
+                    if self.target_reg_scalers[1] is not None:
+                        df[[self.targets[1]]] = self.target_reg_scalers[1].transform(df[[self.targets[1]]])
+                else:
+                    # Fit temporary scalers for this pool
+                    temp_feature_scaler = StandardScaler()
+                    df[self.features] = temp_feature_scaler.fit_transform(df[self.features])
+                    
+                    temp_target_scaler_1 = StandardScaler()
+                    df[[self.targets[0]]] = temp_target_scaler_1.fit_transform(df[[self.targets[0]]])
+                    
+                    temp_target_scaler_2 = StandardScaler()
+                    df[[self.targets[1]]] = temp_target_scaler_2.fit_transform(df[[self.targets[1]]])
+                
+                # Create sequences using hybrid function
+                X, y_cls_1, y_reg_1, y_reg_2 = get_X_y_hybrid(
+                    df, self.features, self.targets, self.n_lags
+                )
+                
+                if not X:
+                    return None
+                    
+                return X, y_cls_1, y_reg_1, y_reg_2
+            except Exception as e:
+                if self.verbose >= 1:
+                    print(f"[HybridLPsDataset] Error processing pool {pool_address}: {e}")
+                return None
+
+        # Load pools in parallel
+        if self.verbose >= 1:
+            print(f"[HybridLPsDataset] Loading {len(self.pool_addresses)} pools into memory...")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+            futures = [executor.submit(process_pool, pool_addr) for pool_addr in self.pool_addresses]
+            
+            processed_count = 0
+            total_samples = 0
+            
+            for i, future in enumerate(concurrent.futures.as_completed(futures)):
+                result = future.result()
+                if result is not None:
+                    X_pool, y_cls_1_pool, y_reg_1_pool, y_reg_2_pool = result
+                    
+                    # Convert to lists if they're numpy arrays
+                    if isinstance(X_pool, np.ndarray):
+                        X_pool = X_pool.tolist()
+                    if isinstance(y_cls_1_pool, np.ndarray):
+                        y_cls_1_pool = y_cls_1_pool.tolist()
+                    if isinstance(y_reg_1_pool, np.ndarray):
+                        y_reg_1_pool = y_reg_1_pool.tolist()
+                    if isinstance(y_reg_2_pool, np.ndarray):
+                        y_reg_2_pool = y_reg_2_pool.tolist()
+                    
+                    # Extend the main containers
+                    self.X.extend(X_pool)
+                    self.y_cls_1.extend(y_cls_1_pool)
+                    self.y_reg_1.extend(y_reg_1_pool)
+                    self.y_reg_2.extend(y_reg_2_pool)
+                    
+                    total_samples += len(X_pool)
+                
+                processed_count += 1
+                if self.verbose >= 1 and processed_count % 100 == 0:
+                    print(f"[HybridLPsDataset] Processed {processed_count}/{len(self.pool_addresses)} pools, {total_samples} samples so far")
+        
+        if self.verbose >= 1:
+            print(f"[HybridLPsDataset] Loaded {total_samples} total samples from {len(self.pool_addresses)} pools")
+
+    def _get_split_dates(self):
+        """Get start and end dates for the current split."""
+        if self.split_dates is None:
+            return None, None
+        if self.split == 'train':
+            return self.split_dates.get('train_start'), self.split_dates.get('train_end')
+        elif self.split == 'val':
+            return self.split_dates.get('val_start'), self.split_dates.get('val_end')
+        elif self.split == 'test':
+            return self.split_dates.get('test_start'), self.split_dates.get('test_end')
+        else:
+            return None, None
+
+    def __len__(self):
+        """Return the total number of samples."""
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        """Get a sample by index for hybrid architecture."""
+        return self.X[idx], self.y_cls_1[idx], self.y_reg_1[idx], self.y_reg_2[idx]

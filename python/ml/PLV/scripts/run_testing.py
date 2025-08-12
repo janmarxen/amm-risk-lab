@@ -151,7 +151,10 @@ def main(args):
         y_cls_tensor_2 = y_cls_2.unsqueeze(1)
         y_reg_tensor_2 = y_reg_2.unsqueeze(1)
         cls_pred_1, reg_pred_1, cls_pred_2, reg_pred_2 = model(X)
-        test_loss = model.__class__.custom_zi_loss(cls_pred_1, reg_pred_1, cls_pred_2, reg_pred_2, y_cls_tensor_1, y_reg_tensor_1, y_cls_tensor_2, y_reg_tensor_2).item()
+        test_loss = model.__class__.custom_zi_loss(
+            cls_pred_1, reg_pred_1, y_cls_tensor_1, y_reg_tensor_1,
+            cls_pred_2, reg_pred_2, y_cls_tensor_2, y_reg_tensor_2
+        ).item()
     print(f"Model's test custom loss: {test_loss:.8f}")
     
     # --- Naive baseline ---
@@ -160,28 +163,74 @@ def main(args):
     y_reg_np_2 = y_reg_2.numpy()
     naive_pred_1 = naive_predict(np.array(y_reg_np_1))
     naive_pred_2 = naive_predict(np.array(y_reg_np_2))
+    
     # For custom loss, need to align shapes and mask
     mask = ~np.isnan(naive_pred_1) & ~np.isnan(naive_pred_2)
-    y_reg_tensor_naive_1 = torch.tensor(naive_pred_1[mask], dtype=torch.float32)
-    y_reg_tensor_naive_2 = torch.tensor(naive_pred_2[mask], dtype=torch.float32)
+    
+    # Create naive classification predictions (assume all non-zero for naive baseline)
+    naive_cls_pred_1 = torch.zeros(len(naive_pred_1[mask]), 1)  # Assume all non-zero class
+    naive_cls_pred_2 = torch.zeros(len(naive_pred_2[mask]), 1)  # Assume all non-zero class
+    
+    y_reg_tensor_naive_1 = torch.tensor(naive_pred_1[mask], dtype=torch.float32).unsqueeze(1)
+    y_reg_tensor_naive_2 = torch.tensor(naive_pred_2[mask], dtype=torch.float32).unsqueeze(1)
     y_cls_tensor_naive_1 = y_cls_1[mask].unsqueeze(1)
     y_cls_tensor_naive_2 = y_cls_2[mask].unsqueeze(1)
-    y_reg_tensor_true_1 = y_reg_1[mask]
-    y_reg_tensor_true_2 = y_reg_2[mask]
-    # Naive loss: use true y_cls, naive y_reg
-    naive_loss = model.__class__.custom_zi_loss(y_cls_tensor_naive_1, y_reg_tensor_naive_1.unsqueeze(1), y_cls_tensor_naive_2, y_reg_tensor_naive_2.unsqueeze(1), y_cls_tensor_naive_1, y_reg_tensor_true_1.unsqueeze(1), y_cls_tensor_naive_2, y_reg_tensor_true_2.unsqueeze(1)).item()
+    y_reg_tensor_true_1 = y_reg_1[mask].unsqueeze(1)
+    y_reg_tensor_true_2 = y_reg_2[mask].unsqueeze(1)
+    
+    # Naive loss: use naive predictions vs true targets
+    naive_loss = model.__class__.custom_zi_loss(
+        naive_cls_pred_1, y_reg_tensor_naive_1, y_cls_tensor_naive_1, y_reg_tensor_true_1,
+        naive_cls_pred_2, y_reg_tensor_naive_2, y_cls_tensor_naive_2, y_reg_tensor_true_2
+    ).item()
     print(f"Naive baseline custom loss: {naive_loss:.8f}")
     # --- Plot ---
     print("Saving figures...")
-    # Task 1 plots
-    y_reg_pred_1[y_cls_pred_1==1] = 0  # Set predicted values to 0 where cls_pred is 1
-    save_actual_vs_predicted(y_reg_np_1, y_reg_pred_1, title=f"Actual vs Predicted {targets[0]} {model_name} (Test Set)", filename=f"actual_vs_predicted_{model_name}_{targets[0]}.png")
-    save_actual_vs_predicted(y_reg_np_1[mask], naive_pred_1[mask], title=f"Naive: Actual vs Predicted {targets[0]} {model_name} (Test Set)", filename=f"naive_actual_vs_predicted_{model_name}_{targets[0]}.png")
     
-    # Task 2 plots
-    y_reg_pred_2[y_cls_pred_2==1] = 0  # Set predicted values to 0 where cls_pred is 1
-    save_actual_vs_predicted(y_reg_np_2, y_reg_pred_2, title=f"Actual vs Predicted {targets[1]} {model_name} (Test Set)", filename=f"actual_vs_predicted_{model_name}_{targets[1]}.png")
-    save_actual_vs_predicted(y_reg_np_2[mask], naive_pred_2[mask], title=f"Naive: Actual vs Predicted {targets[1]} {model_name} (Test Set)", filename=f"naive_actual_vs_predicted_{model_name}_{targets[1]}.png")
+    # For zero-inflated models, the final prediction combines classification and regression:
+    # If cls_pred == 1 (zero class), then final_pred = 0
+    # If cls_pred == 0 (non-zero class), then final_pred = reg_pred
+    
+    # Task 1: Create final predictions using zero-inflated logic
+    final_pred_1 = np.where(y_cls_pred_1 == 1, 0.0, y_reg_pred_1)
+    save_actual_vs_predicted(y_reg_np_1, final_pred_1, 
+                           title=f"Actual vs Predicted {targets[0]} {model_name} (Test Set)", 
+                           filename=f"actual_vs_predicted_{model_name}_{targets[0]}.png")
+    save_actual_vs_predicted(y_reg_np_1[mask], naive_pred_1[mask], 
+                           title=f"Naive: Actual vs Predicted {targets[0]} {model_name} (Test Set)", 
+                           filename=f"naive_actual_vs_predicted_{model_name}_{targets[0]}.png")
+    
+    # Task 2: Create final predictions using zero-inflated logic
+    final_pred_2 = np.where(y_cls_pred_2 == 1, 0.0, y_reg_pred_2)
+    save_actual_vs_predicted(y_reg_np_2, final_pred_2, 
+                           title=f"Actual vs Predicted {targets[1]} {model_name} (Test Set)", 
+                           filename=f"actual_vs_predicted_{model_name}_{targets[1]}.png")
+    save_actual_vs_predicted(y_reg_np_2[mask], naive_pred_2[mask], 
+                           title=f"Naive: Actual vs Predicted {targets[1]} {model_name} (Test Set)", 
+                           filename=f"naive_actual_vs_predicted_{model_name}_{targets[1]}.png")
+    
+    # Additional analysis: print classification accuracy
+    print("\nClassification Analysis:")
+    y_cls_true_1 = y_cls_1.numpy()
+    y_cls_true_2 = y_cls_2.numpy()
+    
+    cls_acc_1 = np.mean(y_cls_pred_1 == y_cls_true_1)
+    cls_acc_2 = np.mean(y_cls_pred_2 == y_cls_true_2)
+    
+    print(f"Task 1 classification accuracy: {cls_acc_1:.4f}")
+    print(f"Task 2 classification accuracy: {cls_acc_2:.4f}")
+    
+    # Regression accuracy only on non-zero cases
+    non_zero_mask_1 = y_cls_true_1 == 0  # Non-zero class
+    non_zero_mask_2 = y_cls_true_2 == 0  # Non-zero class
+    
+    if np.any(non_zero_mask_1):
+        reg_mse_1 = np.mean((y_reg_pred_1[non_zero_mask_1] - y_reg_np_1[non_zero_mask_1])**2)
+        print(f"Task 1 regression MSE (non-zero cases): {reg_mse_1:.6f}")
+    
+    if np.any(non_zero_mask_2):
+        reg_mse_2 = np.mean((y_reg_pred_2[non_zero_mask_2] - y_reg_np_2[non_zero_mask_2])**2)
+        print(f"Task 2 regression MSE (non-zero cases): {reg_mse_2:.6f}")
 
 
 def parse_args():

@@ -1,16 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=gridsearch_test
-#SBATCH --nodes=2
+#SBATCH --job-name=gridsearch
+#SBATCH --nodes=3
 #SBATCH --ntasks-per-node=4        
 #SBATCH --gres=gpu:4              
 #SBATCH --cpus-per-task=8           
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
 #SBATCH --time=03:00:00             
-#SBATCH --output=%j.out
-#SBATCH --error=%j.err
-##SBATCH --output=/dev/null
-##SBATCH --error=/dev/null
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 
 LOG_DIR=/p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_logs
 mkdir -p "$LOG_DIR"
@@ -39,7 +37,7 @@ mkdir -p /p/project1/training2529/marxen1/amm-risk-lab/python/ml/PLV/models/gs_l
 
 ### Configuration ###
 HDF5_PATH="/p/scratch/training2529/uniswap_pools_data_transformed.h5"
-N_POOLS=500  # Reduced for testing
+N_POOLS=200  # Reduced for testing
 MODEL_NAME="transformer_model_gs"
 # Simplified feature set for testing
 FEATURES="price_return,\
