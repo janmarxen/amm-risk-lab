@@ -66,6 +66,10 @@ def main(args):
     # --- Load model ---
     print0("Loading model...")
     input_size = len(features) + len(targets)  # features + target lags (2 targets)
+    
+    # Apply finetuning dropout if specified
+    model_dropout = args.finetune_dropout if args.finetune_dropout is not None else arch['dropout']
+    
     model = ZeroInflatedTransformer(
         input_size=input_size,
         n_lags=arch['n_lags'],
@@ -73,11 +77,29 @@ def main(args):
         num_heads=arch['num_heads'],
         num_layers=arch['num_layers'],
         dense_units=arch['dense_units'],
-        dropout=arch['dropout']
+        dropout=model_dropout  # Use finetuning dropout
     )
     # Load full model checkpoint
     model, _ = load_full_model(model, None, model_path, map_location=device)
     model = model.to(device)
+    
+    # Apply layer freezing if specified
+    if args.freeze_layers:
+        print0("Freezing transformer layers, only training heads...")
+        frozen_params = 0
+        trainable_params = 0
+        for name, param in model.named_parameters():
+            if any(layer in name for layer in ['transformer_encoder', 'input_proj', 'pos_encoder']):
+                param.requires_grad = False  # Freeze transformer layers
+                frozen_params += param.numel()
+            else:
+                trainable_params += param.numel()
+        print0(f"Frozen parameters: {frozen_params:,}")
+        print0(f"Trainable parameters: {trainable_params:,}")
+        print0(f"Frozen ratio: {frozen_params/(frozen_params+trainable_params)*100:.1f}%")
+    else:
+        print0("Training all model parameters...")
+        
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
     # Fit scalers on rank 0
     print0("Fitting scalers on rank 0...")
@@ -92,6 +114,30 @@ def main(args):
             num_workers=int(os.getenv('SLURM_CPUS_PER_TASK', 4)),
             sample_size_pct=1.0, # Use full dataset since its small
         )
+        
+        # Debug: Print scaler statistics
+        print0("=== SCALER DEBUG INFO ===")
+        print0(f"Feature scaler: {type(feature_scaler).__name__}")
+        if hasattr(feature_scaler, 'mean_') and feature_scaler.mean_ is not None:
+            print0(f"  Features mean: {feature_scaler.mean_[:5]}... (showing first 5)")
+            print0(f"  Features std: {feature_scaler.scale_[:5]}... (showing first 5)")
+        
+        print0(f"Target 1 ({targets[0]}) scaler: {type(target_reg_scalers[0]).__name__}")
+        if hasattr(target_reg_scalers[0], 'nonzero_mean_'):
+            print0(f"  {targets[0]} nonzero_mean: {target_reg_scalers[0].nonzero_mean_}")
+            print0(f"  {targets[0]} nonzero_std: {target_reg_scalers[0].nonzero_std_}")
+        elif hasattr(target_reg_scalers[0], 'mean_'):
+            print0(f"  {targets[0]} mean: {target_reg_scalers[0].mean_}")
+            print0(f"  {targets[0]} std: {target_reg_scalers[0].scale_}")
+        
+        print0(f"Target 2 ({targets[1]}) scaler: {type(target_reg_scalers[1]).__name__}")
+        if hasattr(target_reg_scalers[1], 'nonzero_mean_'):
+            print0(f"  {targets[1]} nonzero_mean: {target_reg_scalers[1].nonzero_mean_}")
+            print0(f"  {targets[1]} nonzero_std: {target_reg_scalers[1].nonzero_std_}")
+        elif hasattr(target_reg_scalers[1], 'mean_'):
+            print0(f"  {targets[1]} mean: {target_reg_scalers[1].mean_}")
+            print0(f"  {targets[1]} std: {target_reg_scalers[1].scale_}")
+        print0("========================")
     else:
         feature_scaler = StandardScaler()
         target_reg_scalers = [StandardScaler(), StandardScaler()]
@@ -146,6 +192,8 @@ def main(args):
             train_loader=finetune_loader,
             epochs=args.finetune_epochs,
             lr=args.finetune_lr,
+            weight_decay=args.weight_decay,      # Add weight decay
+            gradient_clip=args.gradient_clip,    # Add gradient clipping
             verbose=1 if rank == 0 else 0,
             val_loader=finetune_val_loader,
             early_stopping_patience=early_stopping_patience,
@@ -172,6 +220,10 @@ def parse_args():
         parser.add_argument('--finetune_epochs', type=int, required=False, default=15)
         parser.add_argument('--finetune_lr', type=float, required=False, default=0.001)
         parser.add_argument('--finetune_batch_size', type=int, required=False, default=32)
+        parser.add_argument('--finetune_dropout', type=float, required=False, default=None, help='Dropout rate for finetuning (if different from pretraining)')
+        parser.add_argument('--weight_decay', type=float, required=False, default=0.0, help='L2 regularization weight decay')
+        parser.add_argument('--gradient_clip', type=float, required=False, default=None, help='Gradient clipping threshold')
+        parser.add_argument('--freeze_layers', action='store_true', help='Freeze transformer layers, only train classification/regression heads')
         parser.add_argument('--seed', type=int, default=42, help='Random seed')
         parser.add_argument('--pretrained_model_name', type=str, required=True, help='Name of the pretrained model file')
         parser.add_argument('--finetuned_model_name', type=str, required=True, help='Name of the finetuned model file')

@@ -1,5 +1,8 @@
 Priority:
 
+- Could it be that the scaling removes all 0s and thus zero inflated modelling does not work well? Should we only scale non-zero values everywhere?
+- Check test script to make sure its doing everything correctly. 
+
 - Implement model loading in C++ for inference (or create microservice?)
 - Create test script using PLV models.
 

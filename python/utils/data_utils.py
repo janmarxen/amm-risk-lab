@@ -38,8 +38,8 @@ Usage:
     # Engineer features for a pool
     df_engineered = feature_engineer(df_raw, verbose=True)
     
-    # Prepare for multi-task learning
-    X, y_cls_1, y_reg_1, y_cls_2, y_reg_2 = get_X_y(
+    # Prepare for hybrid multi-task learning
+    X, y_cls_1, y_reg_1, y_reg_2 = get_X_y(
         df_engineered, features, target_cols, n_lags
     )
 """
@@ -126,17 +126,17 @@ def feature_engineer(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
         
         return df
 
-def get_X_y(df: pd.DataFrame, features: List[str], target_cols: List[str], n_lags: int) -> Tuple[list, list, list, list, list]:
+def get_X_y(df: pd.DataFrame, features: List[str], target_cols: List[str], n_lags: int) -> Tuple[list, list, list, list]:
     """
-    Convert a DataFrame to supervised learning arrays for Multi-task ZeroInflated LSTM/Transformer.
+    Convert a DataFrame to supervised learning arrays for Hybrid Multi-task model.
     
     Creates time series sequences where:
     - X: lagged features (ending at t) + target lags (ending at t-1)
-    - y_cls_1, y_cls_2: classification labels (1 if target == 0, else 0) for each target
-    - y_reg_1, y_reg_2: regression targets (at time t) for each target
+    - y_cls_1: classification labels (1 if target == 0, else 0) for Task 1 (liquidity_return) only
+    - y_reg_1, y_reg_2: regression targets (at time t) for both tasks
     
-    Features at time t are valid - they don't leak information about targets[t].
-    This is ensured by shifting the 
+    Task 1 (liquidity_return): Zero-inflated (classification + regression)
+    Task 2 (volume_return): Standard regression only
     
     Args:
         df (pd.DataFrame): Input DataFrame with features and targets
@@ -145,100 +145,16 @@ def get_X_y(df: pd.DataFrame, features: List[str], target_cols: List[str], n_lag
         n_lags (int): Number of lag steps for sequence creation
         
     Returns:
-        Tuple[list, list, list, list, list]: (X, y_cls_1, y_reg_1, y_cls_2, y_reg_2)
+        Tuple[list, list, list, list]: (X, y_cls_1, y_reg_1, y_reg_2)
         - X: Feature sequences of shape (N, n_lags, num_features + 2)
-        - y_cls_1, y_cls_2: Binary classification targets (zero-inflation indicators)
-        - y_reg_1, y_reg_2: Continuous regression targets
+        - y_cls_1: Binary classification targets for Task 1 only (zero-inflation indicators)
+        - y_reg_1, y_reg_2: Continuous regression targets for both tasks
         
     Raises:
         ValueError: If target_cols doesn't contain exactly 2 targets
     """
     if len(target_cols) != 2:
         raise ValueError("Multi-task model requires exactly 2 target columns")
-    
-    target_col_1, target_col_2 = target_cols
-    
-    df = df.copy()
-    df = df.replace([np.inf, -np.inf], np.nan)
-    df = df.dropna(subset=features + target_cols)
-
-    data_feats = df[features].to_numpy()
-    data_target_1 = df[target_col_1].to_numpy()
-    data_target_2 = df[target_col_2].to_numpy()
-    T = len(df)
-
-    if T < n_lags + 1:
-        return [], [], [], [], []
-
-    # Feature window: t - n_lags + 1 to t (length = n_lags, INCLUDE present)
-    feats_window = np.lib.stride_tricks.sliding_window_view(data_feats, (n_lags, data_feats.shape[1]))
-    feats_window = feats_window[:, 0, :, :]  # shape: (T - n_lags + 1, n_lags, num_features)
-
-    # Target lag windows for both targets: t - n_lags to t - 1 (length = n_lags, EXCLUDE present)
-    target_1_lags = np.lib.stride_tricks.sliding_window_view(data_target_1, n_lags + 1)
-    target_1_lags = target_1_lags[:, :-1]  # Remove value at t
-    target_1_lags = target_1_lags[:, :, np.newaxis]  # shape: (N, n_lags, 1)
-    
-    target_2_lags = np.lib.stride_tricks.sliding_window_view(data_target_2, n_lags + 1)
-    target_2_lags = target_2_lags[:, :-1]  # Remove value at t
-    target_2_lags = target_2_lags[:, :, np.newaxis]  # shape: (N, n_lags, 1)
-
-    # Targets at time t
-    y_1 = data_target_1[n_lags:]
-    y_2 = data_target_2[n_lags:]
-
-    # Match lengths
-    min_len = min(len(feats_window), len(target_1_lags), len(target_2_lags), len(y_1), len(y_2))
-    feats_window = feats_window[-min_len:]
-    target_1_lags = target_1_lags[-min_len:]
-    target_2_lags = target_2_lags[-min_len:]
-    y_1 = y_1[-min_len:]
-    y_2 = y_2[-min_len:]
-
-    # Concatenate features and both target lags
-    X = np.concatenate([feats_window, target_1_lags, target_2_lags], axis=2)  # shape: (N, n_lags, num_features + 2)
-
-    # Filter valid samples
-    mask = (np.isfinite(X).all(axis=(1, 2)) & 
-            np.isfinite(y_1) & np.isfinite(y_2))
-    X = X[mask]
-    y_reg_1 = y_1[mask]
-    y_reg_2 = y_2[mask]
-    y_cls_1 = (y_reg_1 == 0).astype(float)
-    y_cls_2 = (y_reg_2 == 0).astype(float)
-
-    return X.tolist(), y_cls_1.tolist(), y_reg_1.tolist(), y_cls_2.tolist(), y_reg_2.tolist()
-
-def get_X_y_hybrid(df: pd.DataFrame, features: List[str], target_cols: List[str], n_lags: int) -> Tuple[list, list, list, list]:
-    """
-    Convert a DataFrame to supervised learning arrays for Hybrid Multi-task learning:
-    - Task 1 (liquidity_return): Zero-inflated (creates both y_cls_1 and y_reg_1)
-    - Task 2 (volume_return): Standard regression (creates only y_reg_2)
-    
-    Creates time series sequences where:
-    - X: lagged features (ending at t) + target lags (ending at t-1)
-    - y_cls_1: classification labels (1 if liquidity_return == 0, else 0)
-    - y_reg_1: liquidity_return regression targets (at time t)
-    - y_reg_2: volume_return regression targets (at time t)
-    
-    Args:
-        df (pd.DataFrame): Input DataFrame with features and targets
-        features (List[str]): List of feature column names
-        target_cols (List[str]): List of exactly 2 target column names [liquidity_return, volume_return]
-        n_lags (int): Number of lag steps for sequence creation
-        
-    Returns:
-        Tuple[list, list, list, list]: (X, y_cls_1, y_reg_1, y_reg_2)
-        - X: Feature sequences of shape (N, n_lags, num_features + 2)
-        - y_cls_1: Binary classification targets (zero-inflation indicators for task 1)
-        - y_reg_1: Continuous regression targets for task 1 (liquidity_return)
-        - y_reg_2: Continuous regression targets for task 2 (volume_return)
-        
-    Raises:
-        ValueError: If target_cols doesn't contain exactly 2 targets
-    """
-    if len(target_cols) != 2:
-        raise ValueError("Hybrid model requires exactly 2 target columns")
     
     target_col_1, target_col_2 = target_cols
     
@@ -288,11 +204,9 @@ def get_X_y_hybrid(df: pd.DataFrame, features: List[str], target_cols: List[str]
     X = X[mask]
     y_reg_1 = y_1[mask]
     y_reg_2 = y_2[mask]
-    
-    # Task 1: Zero-inflated classification (only for liquidity_return)
+    # Task 1 (liquidity_return): Zero-inflated - create classification targets
     y_cls_1 = (y_reg_1 == 0).astype(float)
-    
-    # Task 2: Standard regression (volume_return - no classification component)
+    # Task 2 (volume_return): Standard regression - no classification needed
 
     return X.tolist(), y_cls_1.tolist(), y_reg_1.tolist(), y_reg_2.tolist()
 

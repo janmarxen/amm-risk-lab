@@ -7,8 +7,8 @@
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
 #SBATCH --time=00:40:00
-#SBATCH --output=data_transform_mpi_%j.out
-#SBATCH --error=data_transform_mpi_%j.err
+#SBATCH --output=logs/data_transform_mpi_%j.out
+#SBATCH --error=logs/data_transform_mpi_%j.err
 ##SBATCH --output=/dev/null
 ##SBATCH --error=/dev/null
 
@@ -33,7 +33,7 @@ echo "CPUs per process: $SLURM_CPUS_PER_TASK"
 # Run with mpiexec and per-process output files
 echo "Starting MPI execution with mpiexec..."
 mpiexec -n $SLURM_NTASKS \
-    --output-filename transform_rank_%r_job_${SLURM_JOB_ID} \
+    --output-filename logs/transform_rank_%r_job_${SLURM_JOB_ID} \
     python3 -m python.ml.PLV.scripts.run_data_transformation \
     --input_hdf5 "$INPUT_HDF5" \
     --output_hdf5 "$OUTPUT_HDF5" \

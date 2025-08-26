@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=transformer_pretraining
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --gres=gpu:4 
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
 #SBATCH --account=training2529
 #SBATCH --partition=dc-gpu
 #SBATCH --time=02:00:00
-#SBATCH --output=%j.out
-#SBATCH --error=%j.err
+#SBATCH --output=logs/pretraining_%j.out
+#SBATCH --error=logs/pretraining_%j.err
 
 ## SBATCH --reservation=training2529 
 
@@ -35,20 +35,66 @@ export CUDA_LAUNCH_BLOCKING=0
 
 set -e
 
+# Start background monitoring
+start_monitoring() {
+    echo "Starting GPU monitoring..."
+    
+    # GPU memory bandwidth monitoring
+    nvidia-smi dmon -s m -d 5 -o DT > logs/gpu_memory_bandwidth_${SLURM_JOB_ID}.log &
+    NVIDIA_DMON_PID=$!
+    
+    # GPU utilization monitoring  
+    nvidia-smi --query-gpu=timestamp,name,index,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv -l 5 > logs/gpu_utilization_${SLURM_JOB_ID}.csv &
+    NVIDIA_SMI_PID=$!
+    
+    # Network monitoring (for multi-node setups)
+    if [ $SLURM_NNODES -gt 1 ]; then
+        sar -n DEV 5 > logs/network_${SLURM_JOB_ID}.log &
+        SAR_PID=$!
+    fi
+    
+    echo "Monitoring PIDs: nvidia-dmon=$NVIDIA_DMON_PID, nvidia-smi=$NVIDIA_SMI_PID"
+}
+
+# Stop monitoring
+stop_monitoring() {
+    echo "Stopping monitoring..."
+    kill $NVIDIA_DMON_PID $NVIDIA_SMI_PID 2>/dev/null
+    if [ $SLURM_NNODES -gt 1 ]; then
+        kill $SAR_PID 2>/dev/null
+    fi
+}
+
+# Trap to ensure monitoring stops when script exits
+trap stop_monitoring EXIT
+
+# Start monitoring before training
+start_monitoring
+
 ### Configuration ###
 INPUT_HDF5="/p/scratch/training2529/uniswap_pools_data_transformed.h5"
 
 MODEL_NAME="transformer_pretrained"
-N_LAGS=5       
-BATCH_SIZE=1024 
-D_MODEL=32      
-NUM_HEADS=4     
-NUM_LAYERS=3    
-DENSE_UNITS=16  
+N_LAGS=10
+# N_LAGS=5  
+# BATCH_SIZE=65536  
+BATCH_SIZE=32768 
+D_MODEL=64 
+# D_MODEL=32   
+NUM_HEADS=16   
+# NUM_HEADS=4     
+NUM_LAYERS=3
+DENSE_UNITS=64     
+# DENSE_UNITS=16  
 DROPOUT=0.3     
-LR=0.001               
+
+# Learning rate scaling based on distributed setup
+BASE_LR=0.001
+NUM_GPUS=$((SLURM_NNODES * 4))  # 4 GPUs per node
+LR=$(echo "$BASE_LR * $NUM_GPUS" | bc -l)
 
 N_POOLS=10000
+# N_POOLS=100
 FEATURES="price_return,\
 price_volatility_3h,price_volatility_6h,price_volatility_24h,\
 liquidity_volatility_3h,liquidity_volatility_6h,liquidity_volatility_24h,\
@@ -76,23 +122,26 @@ liquidity_drain,liquidity_injection"
 TARGETS="liquidity_return,volume_return"
 
 
-USE_VALIDATION=false
-TRAIN_START="2023-01-01"
-TRAIN_END="2025-06-14"
-EPOCHS=97 
-
-# USE_VALIDATION=true
+# USE_VALIDATION=false
 # TRAIN_START="2023-01-01"
-# TRAIN_END="2025-05-01"
-# VAL_START="2025-05-02"
-# VAL_END="2025-06-01"
-# EPOCHS=200 
+# TRAIN_END="2025-06-14"
+# EPOCHS=26 
+
+USE_VALIDATION=true
+TRAIN_START="2023-01-01"
+TRAIN_END="2025-05-01"
+VAL_START="2025-05-02"
+VAL_END="2025-06-01"
+EPOCHS=200 
 
 echo "=== Pretraining Configuration ==="
 echo "Model: $MODEL_NAME"
 echo "N_LAGS: $N_LAGS"
 echo "Batch Size: $BATCH_SIZE"
+echo "Effective batch size: $((BATCH_SIZE * NUM_GPUS))"
 echo "Learning Rate: $LR"
+echo "Scaled LR: $LR"
+echo "Total GPUs: $NUM_GPUS"
 echo "Epochs: $EPOCHS"
 echo "Use Validation: $USE_VALIDATION"
 echo "N_POOLS: $N_POOLS"
@@ -124,11 +173,16 @@ srun --cpu_bind=none bash -c "torchrun_jsc \
     --train_start $TRAIN_START \
     --train_end $TRAIN_END \
     $(if [ "$USE_VALIDATION" = "true" ]; then echo "--val_start $VAL_START --val_end $VAL_END"; fi) \
-    --test_start $TEST_START \
-    --test_end $TEST_END \
     --model_name $MODEL_NAME \
     --n_pools $N_POOLS \
     --features "$FEATURES" \
     --targets "$TARGETS" \
     $(if [ "$USE_VALIDATION" = "true" ]; then echo "--use_validation"; fi)
 "
+
+echo "Training completed. Monitoring logs saved."
+echo "GPU memory bandwidth: logs/gpu_memory_bandwidth_${SLURM_JOB_ID}.log"
+echo "GPU utilization: logs/gpu_utilization_${SLURM_JOB_ID}.csv"
+if [ $SLURM_NNODES -gt 1 ]; then
+    echo "Network usage: logs/network_${SLURM_JOB_ID}.log"
+fi
